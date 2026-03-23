@@ -20,9 +20,9 @@ func main() {
 	err := wails.Run(&options.App{
 		Title:     "miniVPN",
 		Width:     900,
-		Height:    600,
+		Height:    700,
 		MinWidth:  800,
-		MinHeight: 500,
+		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
