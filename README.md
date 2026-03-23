@@ -2,6 +2,8 @@
 
 A lightweight, modern VPN application with split tunneling support for Windows.
 
+![miniVPN Screenshot](docs/images/screenshot.png)
+
 ## Features
 
 - **Server Mode**: Host a VPN server with auto-generated secret codes
