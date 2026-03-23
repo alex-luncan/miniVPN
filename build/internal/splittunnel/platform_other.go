@@ -50,3 +50,18 @@ func DeleteRoute(destination, mask, gateway net.IP) error {
 func RunAsAdmin() bool {
 	return false
 }
+
+// SetupVPNRoutes configures VPN routes (stub for non-Windows)
+func SetupVPNRoutes(serverRealIP, vpnGateway net.IP, vpnInterfaceName string) error {
+	return fmt.Errorf("not implemented on this platform")
+}
+
+// TeardownVPNRoutes removes VPN routes (stub for non-Windows)
+func TeardownVPNRoutes() error {
+	return nil
+}
+
+// IsVPNRoutesConfigured returns whether VPN routes are configured (stub for non-Windows)
+func IsVPNRoutesConfigured() bool {
+	return false
+}

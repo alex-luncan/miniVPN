@@ -20,10 +20,11 @@ type ServerConfig struct {
 
 // ClientSession represents a connected client
 type ClientSession struct {
-	ID        [16]byte
-	Tunnel    *Tunnel
+	ID          [16]byte
+	Tunnel      *Tunnel
 	ConnectedAt time.Time
 	RemoteAddr  string
+	VPNAddress  net.IP // Assigned VPN IP address
 }
 
 // Server represents a VPN server
@@ -37,6 +38,10 @@ type Server struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// IP address management
+	ipPool    *IPPool
+	forwarder *Forwarder
 }
 
 // NewServer creates a new VPN server
@@ -46,11 +51,22 @@ func NewServer(config ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("failed to generate key pair: %w", err)
 	}
 
+	// Create IP pool
+	ipPool, err := NewDefaultIPPool()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create IP pool: %w", err)
+	}
+
+	// Create forwarder
+	forwarder := NewForwarder()
+
 	return &Server{
 		config:     config,
 		keyPair:    keyPair,
 		secretHash: HashSecretCode(config.SecretCode),
 		clients:    make(map[[16]byte]*ClientSession),
+		ipPool:     ipPool,
+		forwarder:  forwarder,
 	}, nil
 }
 
@@ -80,9 +96,17 @@ func (s *Server) Stop() error {
 		s.listener.Close()
 	}
 
-	// Close all client tunnels
+	// Close the forwarder
+	if s.forwarder != nil {
+		s.forwarder.Close()
+	}
+
+	// Close all client tunnels and release IPs
 	s.mu.Lock()
 	for _, client := range s.clients {
+		if client.VPNAddress != nil && s.ipPool != nil {
+			s.ipPool.Release(client.VPNAddress)
+		}
 		client.Tunnel.Close()
 	}
 	s.clients = make(map[[16]byte]*ClientSession)
@@ -245,7 +269,36 @@ func (s *Server) handleConnection(conn net.Conn) {
 	// Clear deadline for established connection
 	conn.SetDeadline(time.Time{})
 
-	// Create tunnel
+	// Allocate VPN IP for this client
+	clientIP, err := s.ipPool.Allocate()
+	if err != nil {
+		conn.Close()
+		return
+	}
+
+	// Send IP assignment
+	serverIP := s.ipPool.ServerIP()
+	subnetMask := s.ipPool.SubnetMask()
+
+	ipAssign := &IPAssignment{
+		MTU: 1420,
+	}
+	copy(ipAssign.ClientIP[:], clientIP.To4())
+	copy(ipAssign.ServerIP[:], serverIP.To4())
+	copy(ipAssign.SubnetMask[:], subnetMask.To4())
+
+	ipAssignMsg := &Message{
+		Type:    MsgTypeIPAssign,
+		Payload: EncodeIPAssignment(ipAssign),
+	}
+
+	if err := WriteMessage(conn, ipAssignMsg); err != nil {
+		s.ipPool.Release(clientIP)
+		conn.Close()
+		return
+	}
+
+	// Create tunnel first without OnData (we'll set it after)
 	tunnel := NewTunnel(conn, cipher, sessionID, &TunnelConfig{
 		OnStateChange: func(state TunnelState) {
 			if state == TunnelStateDisconnected {
@@ -259,12 +312,22 @@ func (s *Server) handleConnection(conn net.Conn) {
 		},
 	})
 
+	// Set OnData callback now that tunnel variable is assigned
+	tunnel.SetOnData(func(packet []byte) {
+		// Forward packets from client to internet
+		s.forwarder.ForwardPacket(packet, sessionID, func(response []byte) {
+			// Send response back to client through tunnel
+			tunnel.Send(response)
+		})
+	})
+
 	// Create client session
 	session := &ClientSession{
 		ID:          sessionID,
 		Tunnel:      tunnel,
 		ConnectedAt: time.Now(),
 		RemoteAddr:  conn.RemoteAddr().String(),
+		VPNAddress:  clientIP,
 	}
 
 	// Add to clients map
@@ -284,7 +347,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 // removeClient removes a client from the server
 func (s *Server) removeClient(sessionID [16]byte) {
 	s.mu.Lock()
-	delete(s.clients, sessionID)
+	if client, exists := s.clients[sessionID]; exists {
+		// Release the client's VPN IP
+		if client.VPNAddress != nil && s.ipPool != nil {
+			s.ipPool.Release(client.VPNAddress)
+		}
+		delete(s.clients, sessionID)
+	}
 	s.mu.Unlock()
 }
 

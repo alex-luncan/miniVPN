@@ -57,10 +57,22 @@ func LoadWintun() error {
 		return wintunLoadErr
 	}
 
-	dll, err := windows.LoadDLL("wintun.dll")
+	// First, extract the embedded wintun.dll
+	dllPath, err := ExtractWintun()
 	if err != nil {
-		wintunLoadErr = fmt.Errorf("failed to load wintun.dll: %w", err)
+		wintunLoadErr = fmt.Errorf("failed to extract wintun.dll: %w", err)
 		return wintunLoadErr
+	}
+
+	// Load the DLL from the extracted path
+	dll, err := windows.LoadDLL(dllPath)
+	if err != nil {
+		// Fallback: try loading from system path
+		dll, err = windows.LoadDLL("wintun.dll")
+		if err != nil {
+			wintunLoadErr = fmt.Errorf("failed to load wintun.dll: %w", err)
+			return wintunLoadErr
+		}
 	}
 	wintunDLL = dll
 
@@ -280,4 +292,79 @@ func (w *WintunAdapter) IsRunning() bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.running
+}
+
+// ConfigureIP configures the IP address on the adapter using netsh
+func (a *Adapter) ConfigureIP(localIP, gateway, mask string) error {
+	// Use netsh to configure the IP address
+	// netsh interface ip set address "miniVPN" static 10.0.0.2 255.255.255.0 10.0.0.1
+	cmd := fmt.Sprintf(`netsh interface ip set address "%s" static %s %s %s`, a.name, localIP, mask, gateway)
+
+	// Execute the command
+	if err := runNetshCommand(cmd); err != nil {
+		return fmt.Errorf("failed to configure IP: %w", err)
+	}
+
+	return nil
+}
+
+// runNetshCommand executes a netsh command
+func runNetshCommand(cmd string) error {
+	// Use syscall to run netsh
+	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
+	createProcess := kernel32.NewProc("CreateProcessW")
+
+	cmdLine := "cmd.exe /c " + cmd
+	cmdLinePtr, _ := syscall.UTF16PtrFromString(cmdLine)
+
+	var si windows.StartupInfo
+	var pi windows.ProcessInformation
+
+	si.Cb = uint32(unsafe.Sizeof(si))
+	si.Flags = windows.STARTF_USESHOWWINDOW
+	si.ShowWindow = windows.SW_HIDE
+
+	ret, _, err := createProcess.Call(
+		0,
+		uintptr(unsafe.Pointer(cmdLinePtr)),
+		0,
+		0,
+		0,
+		windows.CREATE_NO_WINDOW,
+		0,
+		0,
+		uintptr(unsafe.Pointer(&si)),
+		uintptr(unsafe.Pointer(&pi)),
+	)
+
+	if ret == 0 {
+		return fmt.Errorf("CreateProcess failed: %v", err)
+	}
+
+	// Wait for the process to complete
+	windows.WaitForSingleObject(pi.Process, windows.INFINITE)
+
+	// Close handles
+	windows.CloseHandle(pi.Process)
+	windows.CloseHandle(pi.Thread)
+
+	return nil
+}
+
+// Windows wait result constants
+const (
+	waitTimeout = 0x00000102
+	waitFailed  = 0xFFFFFFFF
+)
+
+// waitForEvent waits for a Windows event with a timeout in milliseconds
+func waitForEvent(handle windows.Handle, timeoutMs uint32) error {
+	result, err := windows.WaitForSingleObject(handle, timeoutMs)
+	if result == waitTimeout {
+		return fmt.Errorf("timeout")
+	}
+	if result == waitFailed {
+		return fmt.Errorf("wait failed: %v", err)
+	}
+	return nil
 }

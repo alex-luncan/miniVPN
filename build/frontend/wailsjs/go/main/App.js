@@ -38,6 +38,10 @@ export function GetConnectionInfo() {
   return window['go']['main']['App']['GetConnectionInfo']();
 }
 
+export function GetDebugInfo() {
+  return window['go']['main']['App']['GetDebugInfo']();
+}
+
 export function GetHolePunchStatus() {
   return window['go']['main']['App']['GetHolePunchStatus']();
 }

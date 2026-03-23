@@ -27,6 +27,12 @@ type Client struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Assigned IP information from server
+	assignedIP   net.IP
+	serverVPNIP  net.IP
+	subnetMask   net.IPMask
+	mtu          int
 }
 
 // NewClient creates a new VPN client
@@ -176,6 +182,29 @@ func (c *Client) performHandshake(conn net.Conn) (*Tunnel, error) {
 		return nil, fmt.Errorf("failed to send complete: %w", err)
 	}
 
+	// Wait for IP assignment from server
+	ipAssignMsg, err := ReadMessage(conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read IP assignment: %w", err)
+	}
+
+	if ipAssignMsg.Type != MsgTypeIPAssign {
+		return nil, fmt.Errorf("expected IP assignment, got type %d", ipAssignMsg.Type)
+	}
+
+	ipAssign, err := DecodeIPAssignment(ipAssignMsg.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode IP assignment: %w", err)
+	}
+
+	// Store assigned IP info
+	c.mu.Lock()
+	c.assignedIP = ipAssign.ClientIPNet()
+	c.serverVPNIP = ipAssign.ServerIPNet()
+	c.subnetMask = ipAssign.SubnetMaskNet()
+	c.mtu = int(ipAssign.MTU)
+	c.mu.Unlock()
+
 	// Clear deadline for established connection
 	conn.SetDeadline(time.Time{})
 
@@ -258,4 +287,42 @@ func (c *Client) SessionID() [16]byte {
 		return [16]byte{}
 	}
 	return c.tunnel.SessionID()
+}
+
+// AssignedIP returns the VPN IP address assigned by the server
+func (c *Client) AssignedIP() net.IP {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.assignedIP
+}
+
+// ServerVPNIP returns the server's VPN IP address
+func (c *Client) ServerVPNIP() net.IP {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.serverVPNIP
+}
+
+// SubnetMask returns the VPN subnet mask
+func (c *Client) SubnetMask() net.IPMask {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.subnetMask
+}
+
+// MTU returns the configured MTU
+func (c *Client) MTU() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.mtu == 0 {
+		return 1420
+	}
+	return c.mtu
+}
+
+// Tunnel returns the underlying tunnel (for bridge integration)
+func (c *Client) Tunnel() *Tunnel {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.tunnel
 }

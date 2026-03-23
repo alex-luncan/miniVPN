@@ -29,3 +29,9 @@ coverage.txt
 
 # Wails
 wails.json.bak
+
+# Releases (handled via GitHub Releases)
+releases/
+
+# Windows artifacts
+nul

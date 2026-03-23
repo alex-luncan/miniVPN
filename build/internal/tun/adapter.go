@@ -16,8 +16,14 @@ type Adapter struct {
 	running    bool
 	mu         sync.RWMutex
 
+	// Platform-specific adapter (Wintun on Windows)
+	wintun *WintunAdapter
+
 	// Packet handlers
 	onPacket func([]byte)
+
+	// Stop signal for read loop
+	stopCh chan struct{}
 }
 
 // AdapterConfig holds adapter configuration
@@ -57,6 +63,7 @@ func NewAdapter(config AdapterConfig) (*Adapter, error) {
 		localIP:    localIP.To4(),
 		remoteIP:   remoteIP.To4(),
 		subnetMask: net.IPMask(mask.To4()),
+		stopCh:     make(chan struct{}),
 	}, nil
 }
 
@@ -69,11 +76,30 @@ func (a *Adapter) Start() error {
 		return fmt.Errorf("adapter already running")
 	}
 
-	// On Windows, we would use Wintun here
-	// For now, this is a placeholder that will be implemented
-	// when we have the actual Wintun DLL
+	// Create the Wintun adapter
+	wintun, err := NewWintunAdapter(a.name)
+	if err != nil {
+		return fmt.Errorf("failed to create Wintun adapter: %w", err)
+	}
 
+	// Start the Wintun session
+	if err := wintun.Start(); err != nil {
+		wintun.Close()
+		return fmt.Errorf("failed to start Wintun session: %w", err)
+	}
+
+	a.wintun = wintun
+	a.stopCh = make(chan struct{})
 	a.running = true
+
+	// Configure the IP address
+	if err := a.ConfigureIP(a.localIP.String(), a.remoteIP.String(), ipMaskToString(a.subnetMask)); err != nil {
+		a.wintun.Close()
+		a.wintun = nil
+		a.running = false
+		return fmt.Errorf("failed to configure IP: %w", err)
+	}
+
 	return nil
 }
 
@@ -86,36 +112,79 @@ func (a *Adapter) Stop() error {
 		return nil
 	}
 
+	// Signal stop to any read loops
+	close(a.stopCh)
+
+	// Close Wintun
+	if a.wintun != nil {
+		a.wintun.Close()
+		a.wintun = nil
+	}
+
 	a.running = false
 	return nil
 }
 
-// Write sends a packet through the adapter
+// Write sends a packet through the adapter (to the TUN interface)
 func (a *Adapter) Write(packet []byte) (int, error) {
 	a.mu.RLock()
-	if !a.running {
+	if !a.running || a.wintun == nil {
 		a.mu.RUnlock()
 		return 0, fmt.Errorf("adapter not running")
 	}
+	wintun := a.wintun
 	a.mu.RUnlock()
 
-	// Process outgoing packet
-	// In a real implementation, this would write to the TUN device
+	// Send packet to the TUN interface
+	if err := wintun.SendPacket(packet); err != nil {
+		return 0, fmt.Errorf("failed to send packet: %w", err)
+	}
+
 	return len(packet), nil
 }
 
-// Read receives a packet from the adapter
+// Read receives a packet from the adapter (from the TUN interface)
 func (a *Adapter) Read(buf []byte) (int, error) {
 	a.mu.RLock()
-	if !a.running {
+	if !a.running || a.wintun == nil {
 		a.mu.RUnlock()
 		return 0, fmt.Errorf("adapter not running")
 	}
+	wintun := a.wintun
+	stopCh := a.stopCh
 	a.mu.RUnlock()
 
-	// In a real implementation, this would read from the TUN device
-	// For now, block until stopped
-	select {}
+	// Get the read wait event
+	event, err := wintun.GetReadWaitEvent()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get read event: %w", err)
+	}
+
+	for {
+		// Try to receive a packet
+		packet, err := wintun.ReceivePacket()
+		if err != nil {
+			return 0, fmt.Errorf("failed to receive packet: %w", err)
+		}
+
+		if packet != nil {
+			// Copy packet to buffer
+			n := copy(buf, packet)
+			return n, nil
+		}
+
+		// No packet available, wait for event
+		select {
+		case <-stopCh:
+			return 0, fmt.Errorf("adapter stopped")
+		default:
+			// Wait for read event with timeout
+			if err := waitForEvent(event, 100); err != nil {
+				// Timeout, loop again
+				continue
+			}
+		}
+	}
 }
 
 // SetPacketHandler sets the callback for incoming packets
@@ -145,4 +214,12 @@ func (a *Adapter) IsRunning() bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.running
+}
+
+// ipMaskToString converts an IP mask to dotted decimal string
+func ipMaskToString(mask net.IPMask) string {
+	if len(mask) == 4 {
+		return fmt.Sprintf("%d.%d.%d.%d", mask[0], mask[1], mask[2], mask[3])
+	}
+	return "255.255.255.0"
 }

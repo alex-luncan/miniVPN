@@ -265,6 +265,13 @@ func (t *Tunnel) SessionID() [16]byte {
 	return t.sessionID
 }
 
+// SetOnData sets the callback for incoming data packets
+func (t *Tunnel) SetOnData(handler func([]byte)) {
+	t.mu.Lock()
+	t.onData = handler
+	t.mu.Unlock()
+}
+
 // CopyTo copies data from the tunnel to a writer
 func (t *Tunnel) CopyTo(w io.Writer) error {
 	t.onData = func(data []byte) {

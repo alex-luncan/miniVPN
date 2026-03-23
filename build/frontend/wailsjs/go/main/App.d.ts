@@ -20,6 +20,8 @@ export function GetConnectedClients():Promise<Array<main.ClientInfo>>;
 
 export function GetConnectionInfo():Promise<main.ConnectionInfo>;
 
+export function GetDebugInfo():Promise<Record<string, any>>;
+
 export function GetHolePunchStatus():Promise<Record<string, any>>;
 
 export function GetLocalIP():Promise<string>;

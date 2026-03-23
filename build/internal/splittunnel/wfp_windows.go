@@ -5,6 +5,8 @@ package splittunnel
 import (
 	"fmt"
 	"net"
+	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -394,56 +396,86 @@ func getRouteTable() ([]routeInfo, error) {
 	return routes, nil
 }
 
-// AddRoute adds a route to the routing table
+// AddRoute adds a route to the routing table using the route command
 func AddRoute(destination, mask, gateway net.IP, metric uint32) error {
-	iphlpapi := windows.NewLazySystemDLL("iphlpapi.dll")
-	createIpForwardEntry := iphlpapi.NewProc("CreateIpForwardEntry")
+	// Use "route add" command which handles interface lookup automatically
+	cmd := fmt.Sprintf("route add %s mask %s %s metric %d",
+		destination.String(),
+		net.IP(mask).String(),
+		gateway.String(),
+		metric)
 
-	// Build MIB_IPFORWARDROW structure
-	row := make([]byte, 56)
-
-	// dwForwardDest
-	copy(row[0:4], destination.To4())
-	// dwForwardMask
-	copy(row[4:8], mask)
-	// dwForwardPolicy
-	// dwForwardNextHop
-	copy(row[12:16], gateway.To4())
-	// dwForwardIfIndex - would need to look this up
-	// dwForwardType = 4 (indirect)
-	row[20] = 4
-	// dwForwardProto = 3 (netmgmt)
-	row[24] = 3
-	// dwForwardAge
-	// dwForwardNextHopAS
-	// dwForwardMetric1
-	*(*uint32)(unsafe.Pointer(&row[36])) = metric
-
-	ret, _, err := createIpForwardEntry.Call(uintptr(unsafe.Pointer(&row[0])))
-	if ret != 0 {
-		return fmt.Errorf("CreateIpForwardEntry failed: %v", err)
+	output, err := runCmd("cmd", "/C", cmd)
+	if err != nil {
+		return fmt.Errorf("route add failed: %v (output: %s)", err, output)
 	}
+	return nil
+}
 
+// AddRouteWithInterface adds a route specifying a specific interface
+func AddRouteWithInterface(destination, mask, gateway net.IP, metric uint32, ifIndex int) error {
+	// Use "route add" command with IF parameter to specify interface
+	cmd := fmt.Sprintf("route add %s mask %s %s metric %d IF %d",
+		destination.String(),
+		net.IP(mask).String(),
+		gateway.String(),
+		metric,
+		ifIndex)
+
+	output, err := runCmd("cmd", "/C", cmd)
+	if err != nil {
+		return fmt.Errorf("route add failed: %v (output: %s)", err, output)
+	}
 	return nil
 }
 
 // DeleteRoute removes a route from the routing table
 func DeleteRoute(destination, mask, gateway net.IP) error {
-	iphlpapi := windows.NewLazySystemDLL("iphlpapi.dll")
-	deleteIpForwardEntry := iphlpapi.NewProc("DeleteIpForwardEntry")
+	// Use "route delete" command
+	cmd := fmt.Sprintf("route delete %s mask %s %s",
+		destination.String(),
+		net.IP(mask).String(),
+		gateway.String())
 
-	// Build MIB_IPFORWARDROW structure
-	row := make([]byte, 56)
-	copy(row[0:4], destination.To4())
-	copy(row[4:8], mask)
-	copy(row[12:16], gateway.To4())
+	output, err := runCmd("cmd", "/C", cmd)
+	if err != nil {
+		// Ignore "route not found" errors during cleanup
+		return fmt.Errorf("route delete failed: %v (output: %s)", err, output)
+	}
+	return nil
+}
 
-	ret, _, err := deleteIpForwardEntry.Call(uintptr(unsafe.Pointer(&row[0])))
-	if ret != 0 {
-		return fmt.Errorf("DeleteIpForwardEntry failed: %v", err)
+// GetInterfaceIndexByName returns the interface index for a given adapter name
+func GetInterfaceIndexByName(name string) (int, error) {
+	// Use netsh to find the interface index
+	output, err := runCmd("netsh", "interface", "ipv4", "show", "interfaces")
+	if err != nil {
+		return 0, fmt.Errorf("failed to list interfaces: %v", err)
 	}
 
-	return nil
+	// Parse output to find the interface
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, name) {
+			// Line format: "Idx     Met         MTU          State                Name"
+			fields := strings.Fields(line)
+			if len(fields) >= 1 {
+				var idx int
+				if _, err := fmt.Sscanf(fields[0], "%d", &idx); err == nil {
+					return idx, nil
+				}
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("interface %s not found", name)
+}
+
+// runCmd executes a command and returns its output
+func runCmd(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }
 
 // RunAsAdmin checks if running with admin privileges
