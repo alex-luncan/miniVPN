@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { GetSecretCode, RegenerateSecretCode, StartServer, StopServer, IsConnected, GetLocalIP, GetPublicIP, GetClientCount } from '../../wailsjs/go/main/App'
+  import { GetSecretCode, RegenerateSecretCode, StartServer, StopServer, IsConnected, GetLocalIP, GetPublicIP, GetClientCount, StartSignalingServer, StopSignalingServer, IsSignalingServerRunning, SetSignalingServer, RegisterForHolePunch, GetHolePunchStatus } from '../../wailsjs/go/main/App'
 
   let secretCode = $state('')
   let serverRunning = $state(false)
@@ -13,11 +13,19 @@
   let clientCount = $state(0)
   let pollInterval = null
 
+  // NAT Traversal
+  let signalingPort = $state(51821)
+  let signalingRunning = $state(false)
+  let useExternalSignaling = $state(false)
+  let externalSignalingAddr = $state('')
+  let holePunchRegistered = $state(false)
+
   onMount(async () => {
     try {
       secretCode = await GetSecretCode()
       serverRunning = await IsConnected()
       localIP = await GetLocalIP()
+      signalingRunning = await IsSignalingServerRunning()
 
       // Fetch public IP (async, may take a moment)
       GetPublicIP().then(ip => publicIP = ip).catch(() => publicIP = 'Unable to determine')
@@ -70,6 +78,47 @@
     navigator.clipboard.writeText(secretCode)
     copied = true
     setTimeout(() => copied = false, 2000)
+  }
+
+  async function toggleSignalingServer() {
+    loading = true
+    error = null
+
+    try {
+      if (signalingRunning) {
+        await StopSignalingServer()
+        signalingRunning = false
+      } else {
+        await StartSignalingServer(signalingPort)
+        signalingRunning = true
+      }
+    } catch (e) {
+      error = e.message
+    } finally {
+      loading = false
+    }
+  }
+
+  async function registerHolePunch() {
+    loading = true
+    error = null
+
+    try {
+      // Set signaling server address (use input field or localhost if signaling server is running locally)
+      let signalingAddr = externalSignalingAddr
+      if (!signalingAddr && signalingRunning) {
+        signalingAddr = `127.0.0.1:${signalingPort}`
+      }
+      if (signalingAddr) {
+        await SetSignalingServer(signalingAddr)
+      }
+      await RegisterForHolePunch()
+      holePunchRegistered = true
+    } catch (e) {
+      error = e.message || e.toString() || 'Registration failed'
+    } finally {
+      loading = false
+    }
   }
 </script>
 
@@ -169,6 +218,68 @@
     </button>
   </div>
 
+  <!-- NAT Traversal Section -->
+  <div class="nat-section">
+    <h3>NAT Traversal (UDP Hole Punching)</h3>
+    <p class="section-hint">Enable clients behind NAT/routers to connect without port forwarding</p>
+
+    <div class="nat-options">
+      <!-- Option 1: Run signaling server locally (if you have public IP) -->
+      <div class="nat-option">
+        <h4>Run Signaling Server</h4>
+        <p class="option-hint">Run this if your machine has a public IP (e.g., Azure VM)</p>
+        <div class="option-row">
+          <input
+            type="number"
+            bind:value={signalingPort}
+            min="1024"
+            max="65535"
+            placeholder="51821"
+            disabled={signalingRunning || loading}
+            class="port-input"
+          />
+          <button
+            class="nat-btn"
+            class:active={signalingRunning}
+            onclick={toggleSignalingServer}
+            disabled={loading}
+          >
+            {signalingRunning ? 'Stop Signaling' : 'Start Signaling'}
+          </button>
+        </div>
+        {#if signalingRunning}
+          <p class="status-text success">Signaling server running on port {signalingPort}</p>
+        {/if}
+      </div>
+
+      <!-- Option 2: Use external signaling server -->
+      <div class="nat-option">
+        <h4>Register with External Signaling Server</h4>
+        <p class="option-hint">Use if you're behind NAT and have a signaling server elsewhere</p>
+        <div class="option-row">
+          <input
+            type="text"
+            bind:value={externalSignalingAddr}
+            placeholder="20.82.124.23:51821"
+            disabled={holePunchRegistered || loading}
+            class="addr-input"
+          />
+          <button
+            class="nat-btn"
+            class:active={holePunchRegistered}
+            onclick={registerHolePunch}
+            disabled={loading || holePunchRegistered || !externalSignalingAddr}
+          >
+            {holePunchRegistered ? 'Registered' : 'Register'}
+          </button>
+        </div>
+        {#if holePunchRegistered}
+          <p class="status-text success">Registered for hole punching - clients can now connect!</p>
+        {/if}
+      </div>
+    </div>
+  </div>
+
   {#if serverRunning}
     <div class="connection-info">
       <h4>Connection Details for Clients</h4>
@@ -176,6 +287,9 @@
       <p><strong>Local IP:</strong> {localIP}</p>
       <p><strong>Port:</strong> {port}</p>
       <p><strong>Secret:</strong> {secretCode}</p>
+      {#if signalingRunning}
+        <p><strong>Signaling:</strong> {publicIP}:{signalingPort}</p>
+      {/if}
     </div>
   {/if}
 </div>
@@ -184,6 +298,8 @@
   .server-dashboard {
     width: 100%;
     max-width: 600px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
   }
 
   .status-card {
@@ -450,5 +566,113 @@
     font-family: 'Consolas', 'Monaco', monospace;
     margin-bottom: 8px;
     color: rgba(255, 255, 255, 0.8);
+  }
+
+  /* NAT Traversal Section */
+  .nat-section {
+    background: rgba(255, 193, 7, 0.05);
+    border: 1px solid rgba(255, 193, 7, 0.2);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+  .nat-section h3 {
+    color: #ffc107;
+    font-size: 1rem;
+    margin-bottom: 8px;
+  }
+
+  .section-hint {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 16px;
+  }
+
+  .nat-options {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .nat-option {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    padding: 16px;
+  }
+
+  .nat-option h4 {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 4px;
+  }
+
+  .option-hint {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 12px;
+  }
+
+  .option-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .port-input {
+    width: 100px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 10px;
+    color: #fff;
+    font-family: 'Consolas', 'Monaco', monospace;
+    text-align: center;
+  }
+
+  .addr-input {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 10px;
+    color: #fff;
+    font-family: 'Consolas', 'Monaco', monospace;
+  }
+
+  .nat-btn {
+    padding: 10px 20px;
+    background: rgba(255, 193, 7, 0.2);
+    border: 1px solid rgba(255, 193, 7, 0.4);
+    border-radius: 6px;
+    color: #ffc107;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .nat-btn:hover:not(:disabled) {
+    background: rgba(255, 193, 7, 0.3);
+  }
+
+  .nat-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .nat-btn.active {
+    background: rgba(76, 175, 80, 0.2);
+    border-color: rgba(76, 175, 80, 0.4);
+    color: #4caf50;
+  }
+
+  .status-text {
+    font-size: 0.8rem;
+    margin-top: 8px;
+  }
+
+  .status-text.success {
+    color: #4caf50;
   }
 </style>

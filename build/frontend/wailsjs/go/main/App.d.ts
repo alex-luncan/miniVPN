@@ -6,6 +6,8 @@ export function CheckAdminPrivileges():Promise<boolean>;
 
 export function ConnectToServer(arg1:string,arg2:number,arg3:string):Promise<void>;
 
+export function ConnectWithHolePunch(arg1:string):Promise<void>;
+
 export function DisableSplitTunnel():Promise<void>;
 
 export function Disconnect():Promise<void>;
@@ -18,6 +20,8 @@ export function GetConnectedClients():Promise<Array<main.ClientInfo>>;
 
 export function GetConnectionInfo():Promise<main.ConnectionInfo>;
 
+export function GetHolePunchStatus():Promise<Record<string, any>>;
+
 export function GetLocalIP():Promise<string>;
 
 export function GetMode():Promise<string>;
@@ -28,20 +32,34 @@ export function GetSecretCode():Promise<string>;
 
 export function GetServerPort():Promise<number>;
 
+export function GetSignalingServer():Promise<string>;
+
 export function GetSplitTunnelStatus():Promise<main.SplitTunnelStatus>;
 
 export function GetTunneledPorts():Promise<Record<string, any>>;
 
 export function IsConnected():Promise<boolean>;
 
+export function IsHolePunchingEnabled():Promise<boolean>;
+
+export function IsSignalingServerRunning():Promise<boolean>;
+
 export function RegenerateSecretCode():Promise<string>;
+
+export function RegisterForHolePunch():Promise<void>;
 
 export function SetMode(arg1:string):Promise<void>;
 
 export function SetServerPort(arg1:number):Promise<void>;
 
+export function SetSignalingServer(arg1:string):Promise<void>;
+
 export function SetTunneledPorts(arg1:Array<number>,arg2:string):Promise<void>;
 
 export function StartServer(arg1:number):Promise<void>;
 
+export function StartSignalingServer(arg1:number):Promise<void>;
+
 export function StopServer():Promise<void>;
+
+export function StopSignalingServer():Promise<void>;

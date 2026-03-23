@@ -1,5 +1,5 @@
 <script>
-  import { ConnectToServer, Disconnect, IsConnected, SetTunneledPorts, GetTunneledPorts } from '../../wailsjs/go/main/App'
+  import { ConnectToServer, Disconnect, IsConnected, SetTunneledPorts, GetTunneledPorts, SetSignalingServer, ConnectWithHolePunch, GetHolePunchStatus } from '../../wailsjs/go/main/App'
   import SplitTunnelConfig from './SplitTunnelConfig.svelte'
 
   let serverIP = $state('')
@@ -10,24 +10,50 @@
   let error = $state(null)
   let showSplitTunnel = $state(false)
 
+  // NAT Traversal
+  let useHolePunch = $state(false)
+  let signalingServer = $state('')
+  let holePunchStatus = $state(null)
+
   async function connect() {
-    if (!serverIP || !secretCode) {
-      error = 'Please enter server IP and secret code'
+    if (!secretCode) {
+      error = 'Please enter secret code'
       return
     }
-    if (!serverPort || serverPort < 1 || serverPort > 65535) {
-      error = 'Please enter a valid port (1-65535)'
-      return
+
+    // If using hole punch, don't require server IP
+    if (!useHolePunch) {
+      if (!serverIP) {
+        error = 'Please enter server IP address'
+        return
+      }
+      if (!serverPort || serverPort < 1 || serverPort > 65535) {
+        error = 'Please enter a valid port (1-65535)'
+        return
+      }
+    } else {
+      if (!signalingServer) {
+        error = 'Please enter signaling server address'
+        return
+      }
     }
 
     loading = true
     error = null
 
     try {
-      await ConnectToServer(serverIP, serverPort, secretCode)
+      if (useHolePunch) {
+        // Set signaling server and connect via hole punch
+        await SetSignalingServer(signalingServer)
+        await ConnectWithHolePunch(secretCode)
+        holePunchStatus = await GetHolePunchStatus()
+      } else {
+        await ConnectToServer(serverIP, serverPort, secretCode)
+      }
       connected = true
     } catch (e) {
-      error = e.message || 'Connection failed'
+      error = e.message || e.toString() || JSON.stringify(e) || 'Connection failed (unknown error)'
+      console.error('Connection error:', e)
     } finally {
       loading = false
     }
@@ -68,29 +94,55 @@
         <div class="error">{error}</div>
       {/if}
 
-      <div class="form-row">
-        <div class="form-group flex-grow">
-          <label for="serverIP">Server IP Address</label>
-          <input
-            id="serverIP"
-            type="text"
-            bind:value={serverIP}
-            placeholder="192.168.1.100 or hostname"
-            disabled={loading}
-          />
-        </div>
-        <div class="form-group port-field">
-          <label for="serverPort">Port</label>
-          <input
-            id="serverPort"
-            type="number"
-            bind:value={serverPort}
-            min="1"
-            max="65535"
-            disabled={loading}
-          />
-        </div>
+      <!-- NAT Traversal Toggle -->
+      <div class="nat-toggle">
+        <label class="toggle-label">
+          <input type="checkbox" bind:checked={useHolePunch} disabled={loading} />
+          <span class="toggle-switch"></span>
+          <span class="toggle-text">NAT Traversal (UDP Hole Punching)</span>
+        </label>
+        <p class="toggle-hint">Enable if you're behind a router without port forwarding</p>
       </div>
+
+      {#if useHolePunch}
+        <!-- Signaling Server (for hole punch) -->
+        <div class="form-group">
+          <label for="signalingServer">Signaling Server</label>
+          <input
+            id="signalingServer"
+            type="text"
+            bind:value={signalingServer}
+            placeholder="20.82.124.23:51821"
+            disabled={loading}
+          />
+          <p class="field-hint">Address of the signaling server (IP:port)</p>
+        </div>
+      {:else}
+        <!-- Direct Connection -->
+        <div class="form-row">
+          <div class="form-group flex-grow">
+            <label for="serverIP">Server IP Address</label>
+            <input
+              id="serverIP"
+              type="text"
+              bind:value={serverIP}
+              placeholder="192.168.1.100 or hostname"
+              disabled={loading}
+            />
+          </div>
+          <div class="form-group port-field">
+            <label for="serverPort">Port</label>
+            <input
+              id="serverPort"
+              type="number"
+              bind:value={serverPort}
+              min="1"
+              max="65535"
+              disabled={loading}
+            />
+          </div>
+        </div>
+      {/if}
 
       <div class="form-group">
         <label for="secretCode">Secret Code</label>
@@ -121,7 +173,7 @@
       <button
         class="connect-btn"
         onclick={connect}
-        disabled={loading || !serverIP || !secretCode}
+        disabled={loading || !secretCode || (useHolePunch ? !signalingServer : !serverIP)}
       >
         {#if loading}
           <div class="spinner"></div>
@@ -460,5 +512,72 @@
 
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+
+  /* NAT Traversal Toggle */
+  .nat-toggle {
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+  }
+
+  .toggle-label input[type="checkbox"] {
+    display: none;
+  }
+
+  .toggle-switch {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    transition: background 0.3s;
+  }
+
+  .toggle-switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.3s;
+  }
+
+  .toggle-label input:checked + .toggle-switch {
+    background: #ffc107;
+  }
+
+  .toggle-label input:checked + .toggle-switch::after {
+    transform: translateX(20px);
+  }
+
+  .toggle-text {
+    font-weight: 500;
+    color: #fff;
+  }
+
+  .toggle-hint {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 8px;
+    margin-left: 56px;
+  }
+
+  .field-hint {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 6px;
   }
 </style>

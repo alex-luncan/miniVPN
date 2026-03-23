@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"minivpn/internal/firewall"
+	"minivpn/internal/holepunch"
 	"minivpn/internal/splittunnel"
 	"minivpn/internal/vpn"
 )
@@ -59,6 +61,12 @@ type App struct {
 
 	// Split tunnel
 	splitTunnel *splittunnel.Manager
+
+	// NAT Traversal / Hole Punching
+	signalingServer  *holepunch.SignalingServer
+	holePunchClient  *holepunch.Client
+	signalingAddr    string // Address of signaling server (e.g., "20.82.124.23:51821")
+	useHolePunching  bool
 }
 
 // NewApp creates a new App application struct
@@ -72,6 +80,9 @@ func NewApp() *App {
 // startup is called when the app starts
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// Ensure Windows Firewall allows this app
+	firewall.EnsureAppAllowed()
 }
 
 // shutdown is called when the app is closing
@@ -298,6 +309,16 @@ func (a *App) StartServer(port int) error {
 	}
 
 	a.server = server
+
+	// Auto-register with signaling server if it's running locally
+	if a.signalingServer != nil && a.signalingAddr != "" {
+		go func() {
+			// Small delay to ensure signaling server is fully ready
+			time.Sleep(500 * time.Millisecond)
+			a.registerWithSignalingServer()
+		}()
+	}
+
 	return nil
 }
 
@@ -536,4 +557,247 @@ func (a *App) SetServerPort(port int) error {
 // CheckAdminPrivileges checks if running with admin privileges
 func (a *App) CheckAdminPrivileges() bool {
 	return splittunnel.RunAsAdmin()
+}
+
+// ============== NAT Traversal / Hole Punching ==============
+
+// SetSignalingServer sets the signaling server address for NAT traversal
+func (a *App) SetSignalingServer(addr string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.signalingAddr = addr
+	a.useHolePunching = addr != ""
+	return nil
+}
+
+// GetSignalingServer returns the current signaling server address
+func (a *App) GetSignalingServer() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.signalingAddr
+}
+
+// IsHolePunchingEnabled returns whether hole punching is enabled
+func (a *App) IsHolePunchingEnabled() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.useHolePunching
+}
+
+// StartSignalingServer starts the signaling server (run on machine with public IP)
+func (a *App) StartSignalingServer(port int) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.signalingServer != nil {
+		return fmt.Errorf("signaling server already running")
+	}
+
+	server, err := holepunch.NewSignalingServer(port)
+	if err != nil {
+		return fmt.Errorf("failed to start signaling server: %w", err)
+	}
+
+	server.Start()
+	a.signalingServer = server
+
+	// Auto-set signaling address to localhost for local registration
+	a.signalingAddr = fmt.Sprintf("127.0.0.1:%d", port)
+	a.useHolePunching = true
+
+	return nil
+}
+
+// StopSignalingServer stops the signaling server
+func (a *App) StopSignalingServer() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.signalingServer != nil {
+		a.signalingServer.Stop()
+		a.signalingServer = nil
+	}
+	return nil
+}
+
+// IsSignalingServerRunning returns whether the signaling server is running
+func (a *App) IsSignalingServerRunning() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.signalingServer != nil
+}
+
+// RegisterForHolePunch registers this server with the signaling server for hole punching
+func (a *App) RegisterForHolePunch() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.signalingAddr == "" {
+		return fmt.Errorf("signaling server not configured")
+	}
+
+	if a.secretCode == "" {
+		return fmt.Errorf("secret code not set")
+	}
+
+	client, err := holepunch.NewClient(a.signalingAddr)
+	if err != nil {
+		return fmt.Errorf("failed to create hole punch client: %w", err)
+	}
+
+	// Discover our public address
+	publicAddr, err := client.DiscoverPublicAddr()
+	if err != nil {
+		client.Close()
+		return fmt.Errorf("failed to discover public address: %w", err)
+	}
+
+	// Register with signaling server
+	sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+	if err := client.RegisterAsServer(a.secretCode, sessionID); err != nil {
+		client.Close()
+		return fmt.Errorf("failed to register with signaling server: %w", err)
+	}
+
+	a.holePunchClient = client
+	_ = publicAddr // We have our public address now
+
+	// Start keepalive goroutine
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			a.mu.RLock()
+			hpClient := a.holePunchClient
+			a.mu.RUnlock()
+
+			if hpClient == nil {
+				return
+			}
+
+			select {
+			case <-ticker.C:
+				hpClient.SendKeepAlive()
+			case <-a.ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return nil
+}
+
+// registerWithSignalingServer is a helper that registers without UI interaction
+func (a *App) registerWithSignalingServer() error {
+	a.mu.Lock()
+	signalingAddr := a.signalingAddr
+	secretCode := a.secretCode
+	a.mu.Unlock()
+
+	if signalingAddr == "" {
+		return fmt.Errorf("signaling server not configured")
+	}
+	if secretCode == "" {
+		return fmt.Errorf("secret code not set")
+	}
+
+	client, err := holepunch.NewClient(signalingAddr)
+	if err != nil {
+		return fmt.Errorf("failed to create hole punch client: %w", err)
+	}
+
+	// Discover our public address
+	_, err = client.DiscoverPublicAddr()
+	if err != nil {
+		client.Close()
+		return fmt.Errorf("failed to discover public address: %w", err)
+	}
+
+	// Register with signaling server
+	sessionID := fmt.Sprintf("%d", time.Now().UnixNano())
+	if err := client.RegisterAsServer(secretCode, sessionID); err != nil {
+		client.Close()
+		return fmt.Errorf("failed to register: %w", err)
+	}
+
+	a.mu.Lock()
+	a.holePunchClient = client
+	a.mu.Unlock()
+
+	return nil
+}
+
+// ConnectWithHolePunch connects to a peer using hole punching
+func (a *App) ConnectWithHolePunch(secretCode string) error {
+	a.mu.Lock()
+	if a.signalingAddr == "" {
+		a.mu.Unlock()
+		return fmt.Errorf("signaling server not configured")
+	}
+	signalingAddr := a.signalingAddr
+	a.mu.Unlock()
+
+	// Create hole punch client
+	client, err := holepunch.NewClient(signalingAddr)
+	if err != nil {
+		return fmt.Errorf("failed to create hole punch client: %w", err)
+	}
+
+	// Discover our public address first
+	_, err = client.DiscoverPublicAddr()
+	if err != nil {
+		client.Close()
+		return fmt.Errorf("failed to discover public address: %w", err)
+	}
+
+	// Request peer info from signaling server
+	peerAddr, err := client.ConnectToPeer(secretCode)
+	if err != nil {
+		client.Close()
+		return fmt.Errorf("failed to get peer info: %w", err)
+	}
+
+	// Perform hole punching
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	if err := client.PunchHole(ctx, peerAddr); err != nil {
+		client.Close()
+		return fmt.Errorf("hole punching failed: %w", err)
+	}
+
+	// Store the client for the VPN tunnel
+	a.mu.Lock()
+	a.holePunchClient = client
+	a.secretCode = secretCode
+	a.serverIP = peerAddr.IP.String()
+	a.mu.Unlock()
+
+	return nil
+}
+
+// GetHolePunchStatus returns the current hole punch connection status
+func (a *App) GetHolePunchStatus() map[string]interface{} {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	status := map[string]interface{}{
+		"enabled":          a.useHolePunching,
+		"signalingServer":  a.signalingAddr,
+		"signalingRunning": a.signalingServer != nil,
+		"connected":        a.holePunchClient != nil,
+	}
+
+	if a.holePunchClient != nil {
+		if pubAddr := a.holePunchClient.GetPublicAddr(); pubAddr != nil {
+			status["publicAddr"] = pubAddr.String()
+		}
+		if peerAddr := a.holePunchClient.GetPeerAddr(); peerAddr != nil {
+			status["peerAddr"] = peerAddr.String()
+		}
+	}
+
+	return status
 }

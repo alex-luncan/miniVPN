@@ -10,6 +10,10 @@ export function ConnectToServer(arg1, arg2, arg3) {
   return window['go']['main']['App']['ConnectToServer'](arg1, arg2, arg3);
 }
 
+export function ConnectWithHolePunch(arg1) {
+  return window['go']['main']['App']['ConnectWithHolePunch'](arg1);
+}
+
 export function DisableSplitTunnel() {
   return window['go']['main']['App']['DisableSplitTunnel']();
 }
@@ -34,6 +38,10 @@ export function GetConnectionInfo() {
   return window['go']['main']['App']['GetConnectionInfo']();
 }
 
+export function GetHolePunchStatus() {
+  return window['go']['main']['App']['GetHolePunchStatus']();
+}
+
 export function GetLocalIP() {
   return window['go']['main']['App']['GetLocalIP']();
 }
@@ -54,6 +62,10 @@ export function GetServerPort() {
   return window['go']['main']['App']['GetServerPort']();
 }
 
+export function GetSignalingServer() {
+  return window['go']['main']['App']['GetSignalingServer']();
+}
+
 export function GetSplitTunnelStatus() {
   return window['go']['main']['App']['GetSplitTunnelStatus']();
 }
@@ -66,8 +78,20 @@ export function IsConnected() {
   return window['go']['main']['App']['IsConnected']();
 }
 
+export function IsHolePunchingEnabled() {
+  return window['go']['main']['App']['IsHolePunchingEnabled']();
+}
+
+export function IsSignalingServerRunning() {
+  return window['go']['main']['App']['IsSignalingServerRunning']();
+}
+
 export function RegenerateSecretCode() {
   return window['go']['main']['App']['RegenerateSecretCode']();
+}
+
+export function RegisterForHolePunch() {
+  return window['go']['main']['App']['RegisterForHolePunch']();
 }
 
 export function SetMode(arg1) {
@@ -78,6 +102,10 @@ export function SetServerPort(arg1) {
   return window['go']['main']['App']['SetServerPort'](arg1);
 }
 
+export function SetSignalingServer(arg1) {
+  return window['go']['main']['App']['SetSignalingServer'](arg1);
+}
+
 export function SetTunneledPorts(arg1, arg2) {
   return window['go']['main']['App']['SetTunneledPorts'](arg1, arg2);
 }
@@ -86,6 +114,14 @@ export function StartServer(arg1) {
   return window['go']['main']['App']['StartServer'](arg1);
 }
 
+export function StartSignalingServer(arg1) {
+  return window['go']['main']['App']['StartSignalingServer'](arg1);
+}
+
 export function StopServer() {
   return window['go']['main']['App']['StopServer']();
+}
+
+export function StopSignalingServer() {
+  return window['go']['main']['App']['StopSignalingServer']();
 }
