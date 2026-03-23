@@ -42,6 +42,10 @@ export function GetMode() {
   return window['go']['main']['App']['GetMode']();
 }
 
+export function GetPublicIP() {
+  return window['go']['main']['App']['GetPublicIP']();
+}
+
 export function GetSecretCode() {
   return window['go']['main']['App']['GetSecretCode']();
 }

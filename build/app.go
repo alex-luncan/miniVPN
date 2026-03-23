@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -468,6 +471,42 @@ func (a *App) GetLocalIP() string {
 		}
 	}
 	return "Unknown"
+}
+
+// GetPublicIP returns the public/external IP address
+func (a *App) GetPublicIP() string {
+	// Try multiple services in case one is down
+	services := []string{
+		"https://api.ipify.org",
+		"https://icanhazip.com",
+		"https://ifconfig.me/ip",
+	}
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	for _, service := range services {
+		resp, err := client.Get(service)
+		if err != nil {
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				continue
+			}
+			ip := strings.TrimSpace(string(body))
+			// Validate it looks like an IP
+			if net.ParseIP(ip) != nil {
+				return ip
+			}
+		}
+	}
+
+	return "Unable to determine"
 }
 
 // GetServerPort returns the configured server port

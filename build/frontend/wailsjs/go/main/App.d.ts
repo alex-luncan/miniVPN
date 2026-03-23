@@ -22,6 +22,8 @@ export function GetLocalIP():Promise<string>;
 
 export function GetMode():Promise<string>;
 
+export function GetPublicIP():Promise<string>;
+
 export function GetSecretCode():Promise<string>;
 
 export function GetServerPort():Promise<number>;

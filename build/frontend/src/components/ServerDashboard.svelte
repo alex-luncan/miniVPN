@@ -1,10 +1,11 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { GetSecretCode, RegenerateSecretCode, StartServer, StopServer, IsConnected, GetLocalIP, GetClientCount } from '../../wailsjs/go/main/App'
+  import { GetSecretCode, RegenerateSecretCode, StartServer, StopServer, IsConnected, GetLocalIP, GetPublicIP, GetClientCount } from '../../wailsjs/go/main/App'
 
   let secretCode = $state('')
   let serverRunning = $state(false)
   let localIP = $state('Loading...')
+  let publicIP = $state('Loading...')
   let port = $state(51820)
   let loading = $state(false)
   let error = $state(null)
@@ -17,6 +18,9 @@
       secretCode = await GetSecretCode()
       serverRunning = await IsConnected()
       localIP = await GetLocalIP()
+
+      // Fetch public IP (async, may take a moment)
+      GetPublicIP().then(ip => publicIP = ip).catch(() => publicIP = 'Unable to determine')
 
       // Poll for client count when server is running
       pollInterval = setInterval(async () => {
@@ -90,7 +94,12 @@
 
   <div class="info-grid">
     <div class="info-card">
-      <label>Server IP Address</label>
+      <label>Public IP (for external clients)</label>
+      <div class="info-value">{publicIP}</div>
+    </div>
+
+    <div class="info-card">
+      <label>Local IP (for LAN clients)</label>
       <div class="info-value">{localIP}</div>
     </div>
 
@@ -163,7 +172,8 @@
   {#if serverRunning}
     <div class="connection-info">
       <h4>Connection Details for Clients</h4>
-      <p><strong>IP:</strong> {localIP}</p>
+      <p><strong>Public IP:</strong> {publicIP}</p>
+      <p><strong>Local IP:</strong> {localIP}</p>
       <p><strong>Port:</strong> {port}</p>
       <p><strong>Secret:</strong> {secretCode}</p>
     </div>
@@ -249,7 +259,7 @@
 
   .info-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 16px;
     margin-bottom: 24px;
   }
