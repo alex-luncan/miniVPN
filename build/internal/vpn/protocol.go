@@ -16,6 +16,7 @@ const (
 	MsgTypeData              = 0x04
 	MsgTypeKeepAlive         = 0x05
 	MsgTypeDisconnect        = 0x06
+	MsgTypeIPAssign          = 0x07
 )
 
 // Protocol constants
@@ -183,4 +184,51 @@ func DecodeHandshakeComplete(data []byte) (*HandshakeComplete, error) {
 	copy(complete.Encrypted, data[16:])
 
 	return complete, nil
+}
+
+// IPAssignment is sent by server to assign an IP address to the client
+type IPAssignment struct {
+	ClientIP   [4]byte // IP assigned to client (e.g., 10.0.0.2)
+	ServerIP   [4]byte // Server's VPN IP (e.g., 10.0.0.1)
+	SubnetMask [4]byte // Subnet mask (e.g., 255.255.255.0)
+	MTU        uint16  // MTU for the tunnel
+}
+
+// EncodeIPAssignment encodes an IP assignment message
+func EncodeIPAssignment(assign *IPAssignment) []byte {
+	buf := make([]byte, 14) // 4+4+4+2 bytes
+	copy(buf[0:4], assign.ClientIP[:])
+	copy(buf[4:8], assign.ServerIP[:])
+	copy(buf[8:12], assign.SubnetMask[:])
+	binary.BigEndian.PutUint16(buf[12:14], assign.MTU)
+	return buf
+}
+
+// DecodeIPAssignment decodes an IP assignment message
+func DecodeIPAssignment(data []byte) (*IPAssignment, error) {
+	if len(data) < 14 {
+		return nil, fmt.Errorf("IP assignment too short")
+	}
+
+	assign := &IPAssignment{
+		MTU: binary.BigEndian.Uint16(data[12:14]),
+	}
+	copy(assign.ClientIP[:], data[0:4])
+	copy(assign.ServerIP[:], data[4:8])
+	copy(assign.SubnetMask[:], data[8:12])
+
+	return assign, nil
+}
+
+// ToNetIP converts the byte arrays in IPAssignment to net.IP
+func (a *IPAssignment) ClientIPNet() net.IP {
+	return net.IPv4(a.ClientIP[0], a.ClientIP[1], a.ClientIP[2], a.ClientIP[3])
+}
+
+func (a *IPAssignment) ServerIPNet() net.IP {
+	return net.IPv4(a.ServerIP[0], a.ServerIP[1], a.ServerIP[2], a.ServerIP[3])
+}
+
+func (a *IPAssignment) SubnetMaskNet() net.IPMask {
+	return net.IPv4Mask(a.SubnetMask[0], a.SubnetMask[1], a.SubnetMask[2], a.SubnetMask[3])
 }

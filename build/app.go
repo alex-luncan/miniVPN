@@ -13,6 +13,7 @@ import (
 	"minivpn/internal/firewall"
 	"minivpn/internal/holepunch"
 	"minivpn/internal/splittunnel"
+	"minivpn/internal/tun"
 	"minivpn/internal/vpn"
 )
 
@@ -59,6 +60,10 @@ type App struct {
 	client   *vpn.Client
 	serverIP string
 
+	// TUN adapter and bridge (for actual VPN traffic routing)
+	tunAdapter *tun.Adapter
+	bridge     *vpn.Bridge
+
 	// Split tunnel
 	splitTunnel *splittunnel.Manager
 
@@ -89,6 +94,21 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(ctx context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// Teardown VPN routes
+	splittunnel.TeardownVPNRoutes()
+
+	// Stop bridge
+	if a.bridge != nil {
+		a.bridge.Stop()
+		a.bridge = nil
+	}
+
+	// Stop TUN adapter
+	if a.tunAdapter != nil {
+		a.tunAdapter.Stop()
+		a.tunAdapter = nil
+	}
 
 	// Stop split tunneling
 	if a.splitTunnel != nil {
@@ -158,13 +178,15 @@ func (a *App) ConnectToServer(serverIP string, port int, secretCode string) erro
 		return fmt.Errorf("invalid port: %d", port)
 	}
 
-	// Validate IP address
-	if net.ParseIP(serverIP) == nil {
+	// Resolve server address to IP
+	serverRealIP := net.ParseIP(serverIP)
+	if serverRealIP == nil {
 		// Try to resolve hostname
-		_, err := net.LookupHost(serverIP)
-		if err != nil {
+		addrs, err := net.LookupHost(serverIP)
+		if err != nil || len(addrs) == 0 {
 			return fmt.Errorf("invalid server address: %s", serverIP)
 		}
+		serverRealIP = net.ParseIP(addrs[0])
 	}
 
 	// Store connection info
@@ -179,41 +201,127 @@ func (a *App) ConnectToServer(serverIP string, port int, secretCode string) erro
 		SecretCode: secretCode,
 		OnStateChange: func(state vpn.TunnelState) {
 			// State change callback
-			if state == vpn.TunnelStateConnected {
-				// Start split tunneling when connected
-				config := a.splitTunnel.GetConfig()
-				if config.Enabled && len(config.Ports) > 0 {
-					a.splitTunnel.Start()
-				}
-			} else if state == vpn.TunnelStateDisconnected {
-				// Stop split tunneling when disconnected
-				a.splitTunnel.Stop()
+			if state == vpn.TunnelStateDisconnected {
+				// Cleanup on disconnect
+				a.cleanupVPNConnection()
 			}
 		},
 		OnError: func(err error) {
-			// Error callback
+			// Error callback - could log or notify UI
 		},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	// Connect to server
+	// Connect to server (this also receives IP assignment)
 	if err := client.Connect(); err != nil {
 		return fmt.Errorf("connection failed: %w", err)
 	}
 
 	a.client = client
 
+	// Get assigned IP info from client
+	assignedIP := client.AssignedIP()
+	serverVPNIP := client.ServerVPNIP()
+	subnetMask := client.SubnetMask()
+	mtu := client.MTU()
+
+	if assignedIP == nil || serverVPNIP == nil {
+		client.Disconnect()
+		return fmt.Errorf("failed to get IP assignment from server")
+	}
+
+	// Create TUN adapter with assigned IP
+	tunConfig := tun.AdapterConfig{
+		Name:       "miniVPN",
+		LocalIP:    assignedIP.String(),
+		RemoteIP:   serverVPNIP.String(),
+		SubnetMask: ipMaskToString(subnetMask),
+		MTU:        mtu,
+	}
+
+	tunAdapter, err := tun.NewAdapter(tunConfig)
+	if err != nil {
+		client.Disconnect()
+		return fmt.Errorf("failed to create TUN adapter: %w", err)
+	}
+
+	// Start TUN adapter
+	if err := tunAdapter.Start(); err != nil {
+		client.Disconnect()
+		return fmt.Errorf("failed to start TUN adapter: %w", err)
+	}
+
+	a.tunAdapter = tunAdapter
+
+	// Create and start bridge between TUN and tunnel
+	bridge, err := vpn.NewBridge(vpn.BridgeConfig{
+		Adapter: tunAdapter,
+		Tunnel:  client.Tunnel(),
+		MTU:     mtu,
+	})
+	if err != nil {
+		tunAdapter.Stop()
+		client.Disconnect()
+		return fmt.Errorf("failed to create bridge: %w", err)
+	}
+
+	if err := bridge.Start(); err != nil {
+		tunAdapter.Stop()
+		client.Disconnect()
+		return fmt.Errorf("failed to start bridge: %w", err)
+	}
+
+	a.bridge = bridge
+
+	// Setup VPN routes (route all traffic through VPN)
+	if err := splittunnel.SetupVPNRoutes(serverRealIP, serverVPNIP, "miniVPN"); err != nil {
+		bridge.Stop()
+		tunAdapter.Stop()
+		client.Disconnect()
+		return fmt.Errorf("failed to setup VPN routes: %w", err)
+	}
+
 	// Start split tunneling if configured
 	config := a.splitTunnel.GetConfig()
 	if config.Enabled && len(config.Ports) > 0 {
-		// Set VPN interface info (placeholder - would use actual VPN interface)
-		a.splitTunnel.SetVPNInterface(net.ParseIP(serverIP), "miniVPN")
+		a.splitTunnel.SetVPNInterface(serverVPNIP, "miniVPN")
 		a.splitTunnel.Start()
 	}
 
 	return nil
+}
+
+// cleanupVPNConnection cleans up VPN resources when disconnecting
+func (a *App) cleanupVPNConnection() {
+	// Stop split tunneling
+	if a.splitTunnel != nil {
+		a.splitTunnel.Stop()
+	}
+
+	// Teardown VPN routes
+	splittunnel.TeardownVPNRoutes()
+
+	// Stop bridge
+	if a.bridge != nil {
+		a.bridge.Stop()
+		a.bridge = nil
+	}
+
+	// Stop TUN adapter
+	if a.tunAdapter != nil {
+		a.tunAdapter.Stop()
+		a.tunAdapter = nil
+	}
+}
+
+// ipMaskToString converts net.IPMask to dotted decimal string
+func ipMaskToString(mask net.IPMask) string {
+	if len(mask) == 4 {
+		return fmt.Sprintf("%d.%d.%d.%d", mask[0], mask[1], mask[2], mask[3])
+	}
+	return "255.255.255.0"
 }
 
 // Disconnect disconnects from the VPN
@@ -221,11 +329,10 @@ func (a *App) Disconnect() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Stop split tunneling first
-	if a.splitTunnel != nil {
-		a.splitTunnel.Stop()
-	}
+	// Cleanup VPN connection resources
+	a.cleanupVPNConnection()
 
+	// Disconnect client
 	if a.client != nil {
 		a.client.Disconnect()
 		a.client = nil

@@ -1,26 +1,28 @@
 # miniVPN
 
-A lightweight, modern VPN application with split tunneling and NAT traversal support for Windows.
+A lightweight, modern VPN application with real traffic routing, split tunneling, and NAT traversal support for Windows.
 
-[![Download](https://img.shields.io/badge/Download-miniVPN.exe-blue?style=for-the-badge&logo=windows)](https://github.com/alex-luncan/miniVPN/releases/latest/download/miniVPN.exe)
+[![Download](https://img.shields.io/badge/Download-miniVPN.zip-blue?style=for-the-badge&logo=windows)](https://github.com/alex-luncan/miniVPN/releases/latest/download/miniVPN.zip)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](https://github.com/alex-luncan/miniVPN/blob/main/license)
 
 ![miniVPN Screenshot](docs/images/screenshot.png)
 
 ## Features
 
-- **Server Mode**: Host a VPN server with auto-generated secret codes
+- **Real VPN Traffic Routing**: All network traffic routed through VPN tunnel using Wintun TUN adapter
+- **Server Mode**: Host a VPN server with auto-generated secret codes and NAT/forwarding
 - **Client Mode**: Connect to VPN servers with IP and secret code
 - **NAT Traversal**: UDP hole punching for connecting through firewalls and routers
 - **Split Tunneling**: Route specific ports through VPN while keeping other traffic on normal network
 - **Auto Firewall Rules**: Automatically configures Windows Firewall on startup
+- **Automatic IP Assignment**: Server assigns VPN IPs (10.0.0.x) to clients automatically
 - **Modern UI**: Clean, dark-themed interface built with Svelte
-- **Single Executable**: Standalone Windows application, no installation required
 
 ## Requirements
 
 - Windows 10, Windows 11, or Windows Server 2019+
-- Administrator privileges (required for VPN and firewall functionality)
+- Administrator privileges (required for TUN adapter, routing, and firewall)
+- **wintun.dll** - Must be placed in the same directory as miniVPN.exe (included in release zip)
 
 ## Quick Start
 
@@ -117,6 +119,7 @@ Inbound Rule: Allow UDP 51821 from Any
 - Go 1.21+
 - Node.js 18+
 - Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
+- **wintun.dll** from https://www.wintun.net/
 
 ### Build Steps
 ```bash
@@ -125,6 +128,11 @@ wails build
 ```
 
 The executable will be created in `build/build/bin/miniVPN.exe`.
+
+### Wintun DLL Setup
+1. Download wintun from https://www.wintun.net/
+2. Extract `wintun/bin/amd64/wintun.dll` (for 64-bit Windows)
+3. Place `wintun.dll` in the same directory as `miniVPN.exe`
 
 ### Build Signaling Server (optional)
 ```bash
@@ -138,21 +146,49 @@ go build -o signaling-server.exe ./cmd/signaling-server/
 miniVPN/
 ├── build/                      # Source code
 │   ├── main.go                 # Go entry point
-│   ├── app.go                  # Application logic
+│   ├── app.go                  # Application logic + TUN/bridge integration
 │   ├── cmd/
 │   │   └── signaling-server/   # Standalone signaling server
 │   ├── internal/
 │   │   ├── vpn/                # VPN protocol implementation
+│   │   │   ├── tunnel.go       # Encrypted tunnel management
+│   │   │   ├── bridge.go       # TUN ↔ Tunnel traffic bridge
+│   │   │   ├── forwarder.go    # Server-side NAT/packet forwarding
+│   │   │   ├── ippool.go       # VPN IP address allocation
+│   │   │   └── protocol.go     # Wire protocol + IP assignment
 │   │   ├── holepunch/          # NAT traversal / hole punching
 │   │   ├── firewall/           # Windows Firewall management
 │   │   ├── splittunnel/        # Split tunneling logic
-│   │   └── tun/                # Virtual network adapter
+│   │   │   ├── routes.go       # VPN route setup/teardown
+│   │   │   └── wfp_windows.go  # Windows Filtering Platform
+│   │   └── tun/                # Virtual network adapter (Wintun)
+│   │       ├── adapter.go      # TUN adapter abstraction
+│   │       └── wintun_windows.go # Wintun DLL integration
 │   ├── frontend/               # Svelte UI
 │   └── wails.json              # Wails configuration
 ├── docs/                       # Documentation
 │   └── images/                 # Screenshots
 └── README.md
 ```
+
+## How It Works
+
+### Traffic Flow
+```
+CLIENT:
+[Apps] → [Windows Network] → [Wintun TUN 10.0.0.x] → [Bridge] → [Encrypt] → [TCP to Server]
+
+SERVER:
+[TCP from Client] → [Decrypt] → [Forwarder/NAT] → [Internet] → [Response] → [Encrypt] → [TCP to Client]
+
+CLIENT (response):
+[TCP from Server] → [Decrypt] → [Bridge] → [Write to TUN] → [Apps receive response]
+```
+
+### VPN IP Assignment
+- Server uses 10.0.0.1
+- Clients are assigned 10.0.0.2, 10.0.0.3, etc.
+- Subnet mask: 255.255.255.0
 
 ## Troubleshooting
 
@@ -181,6 +217,15 @@ Run miniVPN as Administrator to allow automatic firewall rule creation.
 - Traffic is encrypted using AES-256-GCM
 - Key exchange uses Curve25519 ECDH
 - Secret codes are regenerated on each server start
+- All traffic is routed through encrypted tunnel (no leaks)
+
+## Wintun Requirement
+
+miniVPN uses [Wintun](https://www.wintun.net/) - a lightweight TUN driver for Windows developed by the WireGuard project.
+
+**The `wintun.dll` file must be in the same directory as `miniVPN.exe`.**
+
+The release package includes wintun.dll. If building from source, download it from https://www.wintun.net/
 
 ## License
 

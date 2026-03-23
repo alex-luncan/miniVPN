@@ -6,12 +6,15 @@
 - Windows 10 (version 1903 or later)
 - Windows 11
 - Windows Server 2019 or later
-- Administrator privileges
+- Administrator privileges (required for TUN adapter and routing)
 
 ### Installation
-1. Download `miniVPN.exe`
-2. No installation required - simply run the executable
-3. Allow administrator access when prompted
+1. Download `miniVPN.zip` from the releases page
+2. Extract all files to a folder (keep `miniVPN.exe` and `wintun.dll` together)
+3. Run `miniVPN.exe` as Administrator
+4. Allow administrator access when prompted
+
+**Important:** The `wintun.dll` file must be in the same directory as `miniVPN.exe`. This file is required for the VPN to route network traffic.
 
 ## Server Mode
 
@@ -114,12 +117,21 @@ Now only port 14700 traffic goes through VPN. All other traffic uses your normal
 - Server not running
 - Firewall blocking connection
 - Network connectivity issues
+- Missing wintun.dll
 
 **Solutions:**
 1. Verify server IP and secret code
 2. Check if server is running
 3. Allow miniVPN through firewall
 4. Test network connectivity
+5. Ensure `wintun.dll` is in the same folder as `miniVPN.exe`
+
+### "wintun.dll not found" Error
+
+**Solution:**
+1. Download the release ZIP file (not just the exe)
+2. Extract both `miniVPN.exe` and `wintun.dll` to the same folder
+3. Or download wintun.dll manually from https://www.wintun.net/
 
 ### Split Tunneling Not Working
 
@@ -145,6 +157,18 @@ Now only port 14700 traffic goes through VPN. All other traffic uses your normal
 2. Run as Administrator
 3. Add firewall exception
 
+### TUN Adapter Not Created
+
+**Possible causes:**
+- Missing wintun.dll
+- Not running as Administrator
+- Wintun driver conflict
+
+**Solutions:**
+1. Ensure wintun.dll is present
+2. Run as Administrator
+3. Reboot if another VPN was recently used
+
 ## Security Best Practices
 
 1. **Regenerate codes regularly** - Don't reuse the same code indefinitely
@@ -165,10 +189,22 @@ Now only port 14700 traffic goes through VPN. All other traffic uses your normal
 A: Each instance of miniVPN can run one server. For multiple servers, run multiple instances on different ports.
 
 **Q: Is my traffic encrypted?**
-A: Yes, all VPN traffic is encrypted using ChaCha20-Poly1305.
+A: Yes, all VPN traffic is encrypted using AES-256-GCM with Curve25519 key exchange.
 
 **Q: What happens if the server restarts?**
 A: A new secret code is generated. Clients must reconnect with the new code.
 
 **Q: Can I save server settings?**
 A: Settings are not persisted to prevent storing sensitive data.
+
+**Q: What IP address will I get?**
+A: The server assigns IP addresses from 10.0.0.2-254. The server uses 10.0.0.1.
+
+**Q: Does all my traffic go through the VPN?**
+A: Yes, all traffic is routed through the VPN when connected. Use split tunneling to exclude specific ports.
+
+**Q: Why do I need wintun.dll?**
+A: Wintun is a TUN driver that creates a virtual network adapter. It's required to route traffic through the VPN.
+
+**Q: Can I verify my traffic is going through the VPN?**
+A: Yes, visit https://api.ipify.org when connected - it should show the server's public IP.
