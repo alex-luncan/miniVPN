@@ -18,7 +18,7 @@ miniVPN is a split-tunnel VPN application built with Go and Wails, featuring a S
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                   miniVPN.exe                    │
+│                   miniVPN.exe                   │
 ├─────────────────────────────────────────────────┤
 │  ┌─────────────────┐  ┌─────────────────────┐   │
 │  │   Svelte UI     │  │      Wails          │   │
@@ -26,12 +26,12 @@ miniVPN is a split-tunnel VPN application built with Go and Wails, featuring a S
 │  └─────────────────┘  └─────────────────────┘   │
 │           │                     │               │
 │           ▼                     ▼               │
-│  ┌─────────────────────────────────────────┐   │
-│  │              App Layer                   │   │
-│  │  - Mode Management (Server/Client)       │   │
-│  │  - Secret Code Generation                │   │
-│  │  - Connection State                      │   │
-│  └─────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────┐    │
+│  │              App Layer                  │    │
+│  │  - Mode Management (Server/Client)      │    │
+│  │  - Secret Code Generation               │    │
+│  │  - Connection State                     │    │
+│  └─────────────────────────────────────────┘    │
 │                       │                         │
 │           ┌───────────┴───────────┐             │
 │           ▼                       ▼             │
@@ -42,9 +42,9 @@ miniVPN is a split-tunnel VPN application built with Go and Wails, featuring a S
 │           │                       │             │
 │           └───────────┬───────────┘             │
 │                       ▼                         │
-│  ┌─────────────────────────────────────────┐   │
-│  │           Windows Network Stack          │   │
-│  └─────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────┐    │
+│  │           Windows Network Stack         │    │
+│  └─────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────┘
 ```
 
