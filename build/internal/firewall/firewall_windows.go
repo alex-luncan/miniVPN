@@ -21,65 +21,74 @@ func EnsureAppAllowed() error {
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
-	ruleName := "miniVPN"
+	ruleNameUDP := "miniVPN UDP"
+	ruleNameTCP := "miniVPN TCP"
 
-	// Check if rule already exists
-	checkCmd := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", fmt.Sprintf("name=%s", ruleName))
-	output, _ := checkCmd.CombinedOutput()
+	// Check if UDP rule already exists with correct path
+	udpExists := checkRuleExists(ruleNameUDP, exePath)
+	tcpExists := checkRuleExists(ruleNameTCP, exePath)
 
-	if strings.Contains(string(output), ruleName) {
-		// Rule exists, check if it's for the correct path
-		if strings.Contains(string(output), exePath) {
-			// Rule exists and is correct
-			return nil
-		}
-		// Delete old rule
-		deleteCmd := exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", fmt.Sprintf("name=%s", ruleName))
-		deleteCmd.Run()
+	// Both rules exist and are correct - skip
+	if udpExists && tcpExists {
+		return nil
 	}
 
-	// Create inbound rule for UDP
-	inboundUDP := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
-		fmt.Sprintf("name=%s", ruleName),
-		"dir=in",
-		"action=allow",
-		fmt.Sprintf("program=%s", exePath),
-		"protocol=UDP",
-		"enable=yes",
-		"profile=any",
-	)
-	if err := inboundUDP.Run(); err != nil {
-		return fmt.Errorf("failed to create inbound UDP rule: %w", err)
+	// Create UDP rule if needed
+	if !udpExists {
+		inboundUDP := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+			fmt.Sprintf("name=%s", ruleNameUDP),
+			"dir=in",
+			"action=allow",
+			fmt.Sprintf("program=%s", exePath),
+			"protocol=UDP",
+			"enable=yes",
+			"profile=any",
+		)
+		inboundUDP.Run() // Ignore errors - may fail if not admin
 	}
 
-	// Create inbound rule for TCP
-	inboundTCP := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
-		fmt.Sprintf("name=%s TCP", ruleName),
-		"dir=in",
-		"action=allow",
-		fmt.Sprintf("program=%s", exePath),
-		"protocol=TCP",
-		"enable=yes",
-		"profile=any",
-	)
-	if err := inboundTCP.Run(); err != nil {
-		return fmt.Errorf("failed to create inbound TCP rule: %w", err)
+	// Create TCP rule if needed
+	if !tcpExists {
+		inboundTCP := exec.Command("netsh", "advfirewall", "firewall", "add", "rule",
+			fmt.Sprintf("name=%s", ruleNameTCP),
+			"dir=in",
+			"action=allow",
+			fmt.Sprintf("program=%s", exePath),
+			"protocol=TCP",
+			"enable=yes",
+			"profile=any",
+		)
+		inboundTCP.Run() // Ignore errors - may fail if not admin
 	}
 
 	return nil
 }
 
+// checkRuleExists checks if a firewall rule exists for the given program
+func checkRuleExists(ruleName, exePath string) bool {
+	checkCmd := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", fmt.Sprintf("name=%s", ruleName))
+	output, err := checkCmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+
+	outputStr := string(output)
+	// Rule exists if we find the rule name AND the correct program path
+	return strings.Contains(outputStr, ruleName) && strings.Contains(strings.ToLower(outputStr), strings.ToLower(exePath))
+}
+
 // RemoveAppRules removes the firewall rules created by this app
 func RemoveAppRules() error {
-	ruleName := "miniVPN"
-
 	// Delete UDP rule
-	deleteUDP := exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", fmt.Sprintf("name=%s", ruleName))
+	deleteUDP := exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", "name=miniVPN UDP")
 	deleteUDP.Run()
 
 	// Delete TCP rule
-	deleteTCP := exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", fmt.Sprintf("name=%s TCP", ruleName))
+	deleteTCP := exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", "name=miniVPN TCP")
 	deleteTCP.Run()
+
+	// Also clean up old rule names if they exist
+	exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", "name=miniVPN").Run()
 
 	return nil
 }
