@@ -86,7 +86,7 @@ NAT Traversal requires a signaling server running on a machine with a public IP 
 
 miniVPN allows you to route only specific ports through the VPN:
 
-- **Include Mode**: Only selected ports go through VPN (e.g., database port 14700)
+- **Include Mode**: Only selected ports go through VPN (e.g., database port 3306)
 - **Exclude Mode**: All traffic except selected ports goes through VPN
 
 ### Use Cases
