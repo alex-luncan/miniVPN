@@ -7,7 +7,7 @@
 **IMPORTANT**: All commits to this repository MUST be authored by `alex-luncan` only.
 
 - **Author Name**: `alex-luncan`
-- **Author Email**: `alex@luncan.dev`
+- **Author Email**: `alexluncan@pm.me`
 - **No Co-Authors**: Do NOT include `Co-Authored-By` lines in commit messages
 - **No AI Attribution**: Do NOT include Claude, GitHub Copilot, or any other AI assistant attribution
 
@@ -17,7 +17,7 @@ Before committing, ensure your git config is set correctly:
 
 ```bash
 git config user.name "alex-luncan"
-git config user.email "alex@luncan.dev"
+git config user.email "alexluncan@pm.me"
 ```
 
 ### Commit Message Format
