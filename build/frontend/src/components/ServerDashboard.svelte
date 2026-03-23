@@ -260,7 +260,7 @@
           <input
             type="text"
             bind:value={externalSignalingAddr}
-            placeholder="20.82.124.23:51821"
+            placeholder="203.0.113.50:51821"
             disabled={holePunchRegistered || loading}
             class="addr-input"
           />

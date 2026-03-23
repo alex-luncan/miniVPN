@@ -65,7 +65,7 @@ type App struct {
 	// NAT Traversal / Hole Punching
 	signalingServer  *holepunch.SignalingServer
 	holePunchClient  *holepunch.Client
-	signalingAddr    string // Address of signaling server (e.g., "20.82.124.23:51821")
+	signalingAddr    string // Address of signaling server (e.g., "203.0.113.50:51821")
 	useHolePunching  bool
 }
 

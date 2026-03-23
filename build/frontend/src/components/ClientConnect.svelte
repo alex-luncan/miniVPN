@@ -112,7 +112,7 @@
             id="signalingServer"
             type="text"
             bind:value={signalingServer}
-            placeholder="20.82.124.23:51821"
+            placeholder="203.0.113.50:51821"
             disabled={loading}
           />
           <p class="field-hint">Address of the signaling server (IP:port)</p>
