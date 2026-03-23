@@ -36,6 +36,28 @@ export namespace main {
 	        this.bytesRecv = source["bytesRecv"];
 	    }
 	}
+	export class SplitTunnelStatus {
+	    enabled: boolean;
+	    active: boolean;
+	    mode: string;
+	    ports: number[];
+	    ruleCount: number;
+	    isAdmin: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SplitTunnelStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.active = source["active"];
+	        this.mode = source["mode"];
+	        this.ports = source["ports"];
+	        this.ruleCount = source["ruleCount"];
+	        this.isAdmin = source["isAdmin"];
+	    }
+	}
 
 }
 

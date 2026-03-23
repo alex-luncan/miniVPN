@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"minivpn/internal/splittunnel"
 	"minivpn/internal/vpn"
 )
 
@@ -26,6 +27,16 @@ type ClientInfo struct {
 	ConnectedAt string `json:"connectedAt"`
 }
 
+// SplitTunnelStatus holds split tunnel status information
+type SplitTunnelStatus struct {
+	Enabled    bool     `json:"enabled"`
+	Active     bool     `json:"active"`
+	Mode       string   `json:"mode"`
+	Ports      []int    `json:"ports"`
+	RuleCount  int      `json:"ruleCount"`
+	IsAdmin    bool     `json:"isAdmin"`
+}
+
 // App struct holds the application state
 type App struct {
 	ctx context.Context
@@ -43,17 +54,15 @@ type App struct {
 	client   *vpn.Client
 	serverIP string
 
-	// Split tunnel configuration
-	tunneledPorts []int
-	tunnelMode    string // "include" or "exclude"
+	// Split tunnel
+	splitTunnel *splittunnel.Manager
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		tunneledPorts: []int{},
-		tunnelMode:    "include",
-		serverPort:    51820,
+		serverPort:  51820,
+		splitTunnel: splittunnel.NewManager(),
 	}
 }
 
@@ -66,6 +75,11 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(ctx context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// Stop split tunneling
+	if a.splitTunnel != nil {
+		a.splitTunnel.Stop()
+	}
 
 	if a.server != nil {
 		a.server.Stop()
@@ -144,7 +158,17 @@ func (a *App) ConnectToServer(serverIP string, secretCode string) error {
 		ServerPort: a.serverPort,
 		SecretCode: secretCode,
 		OnStateChange: func(state vpn.TunnelState) {
-			// State change callback - could emit events to frontend
+			// State change callback
+			if state == vpn.TunnelStateConnected {
+				// Start split tunneling when connected
+				config := a.splitTunnel.GetConfig()
+				if config.Enabled && len(config.Ports) > 0 {
+					a.splitTunnel.Start()
+				}
+			} else if state == vpn.TunnelStateDisconnected {
+				// Stop split tunneling when disconnected
+				a.splitTunnel.Stop()
+			}
 		},
 		OnError: func(err error) {
 			// Error callback
@@ -160,6 +184,15 @@ func (a *App) ConnectToServer(serverIP string, secretCode string) error {
 	}
 
 	a.client = client
+
+	// Start split tunneling if configured
+	config := a.splitTunnel.GetConfig()
+	if config.Enabled && len(config.Ports) > 0 {
+		// Set VPN interface info (placeholder - would use actual VPN interface)
+		a.splitTunnel.SetVPNInterface(net.ParseIP(serverIP), "miniVPN")
+		a.splitTunnel.Start()
+	}
+
 	return nil
 }
 
@@ -167,6 +200,11 @@ func (a *App) ConnectToServer(serverIP string, secretCode string) error {
 func (a *App) Disconnect() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// Stop split tunneling first
+	if a.splitTunnel != nil {
+		a.splitTunnel.Stop()
+	}
 
 	if a.client != nil {
 		a.client.Disconnect()
@@ -311,17 +349,34 @@ func (a *App) SetTunneledPorts(ports []int, mode string) error {
 		return fmt.Errorf("invalid tunnel mode: %s", mode)
 	}
 
-	// Validate ports
+	// Convert to uint16 and validate
+	portList := make([]uint16, 0, len(ports))
 	for _, port := range ports {
 		if port < 1 || port > 65535 {
 			return fmt.Errorf("invalid port: %d", port)
 		}
+		portList = append(portList, uint16(port))
 	}
 
-	a.tunneledPorts = ports
-	a.tunnelMode = mode
+	// Configure split tunnel manager
+	config := splittunnel.Config{
+		Enabled: len(portList) > 0,
+		Mode:    splittunnel.Mode(mode),
+		Ports:   portList,
+	}
 
-	// TODO: Apply split tunnel rules via WFP when connected
+	if err := a.splitTunnel.Configure(config); err != nil {
+		return fmt.Errorf("failed to configure split tunnel: %w", err)
+	}
+
+	// If connected, apply rules immediately
+	if a.client != nil && a.client.IsConnected() {
+		if config.Enabled {
+			a.splitTunnel.Start()
+		} else {
+			a.splitTunnel.Stop()
+		}
+	}
 
 	return nil
 }
@@ -331,10 +386,65 @@ func (a *App) GetTunneledPorts() map[string]interface{} {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	return map[string]interface{}{
-		"ports": a.tunneledPorts,
-		"mode":  a.tunnelMode,
+	config := a.splitTunnel.GetConfig()
+
+	// Convert uint16 to int for JSON
+	ports := make([]int, len(config.Ports))
+	for i, p := range config.Ports {
+		ports[i] = int(p)
 	}
+
+	return map[string]interface{}{
+		"ports": ports,
+		"mode":  string(config.Mode),
+	}
+}
+
+// GetSplitTunnelStatus returns the split tunnel status
+func (a *App) GetSplitTunnelStatus() SplitTunnelStatus {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	config := a.splitTunnel.GetConfig()
+
+	// Convert uint16 to int for JSON
+	ports := make([]int, len(config.Ports))
+	for i, p := range config.Ports {
+		ports[i] = int(p)
+	}
+
+	return SplitTunnelStatus{
+		Enabled:   config.Enabled,
+		Active:    a.splitTunnel.IsActive(),
+		Mode:      string(config.Mode),
+		Ports:     ports,
+		RuleCount: len(config.Ports),
+		IsAdmin:   splittunnel.RunAsAdmin(),
+	}
+}
+
+// EnableSplitTunnel enables split tunneling
+func (a *App) EnableSplitTunnel() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.splitTunnel.Enable()
+
+	// If connected, start split tunneling
+	if a.client != nil && a.client.IsConnected() {
+		return a.splitTunnel.Start()
+	}
+
+	return nil
+}
+
+// DisableSplitTunnel disables split tunneling
+func (a *App) DisableSplitTunnel() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.splitTunnel.Disable()
+	return a.splitTunnel.Stop()
 }
 
 // GetLocalIP returns the local IP address
@@ -376,4 +486,9 @@ func (a *App) SetServerPort(port int) error {
 
 	a.serverPort = port
 	return nil
+}
+
+// CheckAdminPrivileges checks if running with admin privileges
+func (a *App) CheckAdminPrivileges() bool {
+	return splittunnel.RunAsAdmin()
 }
