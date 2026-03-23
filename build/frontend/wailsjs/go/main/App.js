@@ -6,8 +6,8 @@ export function CheckAdminPrivileges() {
   return window['go']['main']['App']['CheckAdminPrivileges']();
 }
 
-export function ConnectToServer(arg1, arg2) {
-  return window['go']['main']['App']['ConnectToServer'](arg1, arg2);
+export function ConnectToServer(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ConnectToServer'](arg1, arg2, arg3);
 }
 
 export function DisableSplitTunnel() {

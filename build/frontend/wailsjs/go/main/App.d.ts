@@ -4,7 +4,7 @@ import {main} from '../models';
 
 export function CheckAdminPrivileges():Promise<boolean>;
 
-export function ConnectToServer(arg1:string,arg2:string):Promise<void>;
+export function ConnectToServer(arg1:string,arg2:number,arg3:string):Promise<void>;
 
 export function DisableSplitTunnel():Promise<void>;
 

@@ -131,12 +131,17 @@ func (a *App) RegenerateSecretCode() string {
 }
 
 // ConnectToServer attempts to connect to a VPN server (client mode)
-func (a *App) ConnectToServer(serverIP string, secretCode string) error {
+func (a *App) ConnectToServer(serverIP string, port int, secretCode string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	if a.mode != "client" {
 		return fmt.Errorf("not in client mode")
+	}
+
+	// Validate port
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("invalid port: %d", port)
 	}
 
 	// Validate IP address
@@ -150,12 +155,13 @@ func (a *App) ConnectToServer(serverIP string, secretCode string) error {
 
 	// Store connection info
 	a.serverIP = serverIP
+	a.serverPort = port
 	a.secretCode = secretCode
 
 	// Create VPN client
 	client, err := vpn.NewClient(vpn.ClientConfig{
 		ServerAddr: serverIP,
-		ServerPort: a.serverPort,
+		ServerPort: port,
 		SecretCode: secretCode,
 		OnStateChange: func(state vpn.TunnelState) {
 			// State change callback

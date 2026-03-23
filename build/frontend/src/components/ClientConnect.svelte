@@ -3,6 +3,7 @@
   import SplitTunnelConfig from './SplitTunnelConfig.svelte'
 
   let serverIP = $state('')
+  let serverPort = $state(51820)
   let secretCode = $state('')
   let connected = $state(false)
   let loading = $state(false)
@@ -14,12 +15,16 @@
       error = 'Please enter server IP and secret code'
       return
     }
+    if (!serverPort || serverPort < 1 || serverPort > 65535) {
+      error = 'Please enter a valid port (1-65535)'
+      return
+    }
 
     loading = true
     error = null
 
     try {
-      await ConnectToServer(serverIP, secretCode)
+      await ConnectToServer(serverIP, serverPort, secretCode)
       connected = true
     } catch (e) {
       error = e.message || 'Connection failed'
@@ -63,15 +68,28 @@
         <div class="error">{error}</div>
       {/if}
 
-      <div class="form-group">
-        <label for="serverIP">Server IP Address</label>
-        <input
-          id="serverIP"
-          type="text"
-          bind:value={serverIP}
-          placeholder="192.168.1.100 or hostname"
-          disabled={loading}
-        />
+      <div class="form-row">
+        <div class="form-group flex-grow">
+          <label for="serverIP">Server IP Address</label>
+          <input
+            id="serverIP"
+            type="text"
+            bind:value={serverIP}
+            placeholder="192.168.1.100 or hostname"
+            disabled={loading}
+          />
+        </div>
+        <div class="form-group port-field">
+          <label for="serverPort">Port</label>
+          <input
+            id="serverPort"
+            type="number"
+            bind:value={serverPort}
+            min="1"
+            max="65535"
+            disabled={loading}
+          />
+        </div>
       </div>
 
       <div class="form-group">
@@ -206,8 +224,30 @@
     margin-bottom: 24px;
   }
 
+  .form-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
   .form-group {
     margin-bottom: 20px;
+  }
+
+  .form-row .form-group {
+    margin-bottom: 0;
+  }
+
+  .form-group.flex-grow {
+    flex: 1;
+  }
+
+  .form-group.port-field {
+    width: 100px;
+  }
+
+  .form-group.port-field input {
+    text-align: center;
   }
 
   .form-group label {
