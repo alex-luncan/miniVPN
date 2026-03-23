@@ -1,0 +1,31 @@
+# Claude-related (MUST exclude)
+.claude/
+*.claude
+.claude*
+
+# Build artifacts
+build/frontend/node_modules/
+build/frontend/dist/
+build/build/
+*.exe
+*.dll
+*.syso
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Go
+*.test
+*.out
+coverage.txt
+
+# Wails
+wails.json.bak
