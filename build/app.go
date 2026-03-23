@@ -2,29 +2,50 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base32"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
+	"time"
+
+	"minivpn/internal/vpn"
 )
+
+// ConnectionInfo holds information about the current connection
+type ConnectionInfo struct {
+	State       string `json:"state"`
+	ServerIP    string `json:"serverIP"`
+	ConnectedAt string `json:"connectedAt"`
+	BytesSent   uint64 `json:"bytesSent"`
+	BytesRecv   uint64 `json:"bytesRecv"`
+}
+
+// ClientInfo holds information about a connected client (server mode)
+type ClientInfo struct {
+	SessionID   string `json:"sessionId"`
+	RemoteAddr  string `json:"remoteAddr"`
+	ConnectedAt string `json:"connectedAt"`
+}
 
 // App struct holds the application state
 type App struct {
-	ctx        context.Context
+	ctx context.Context
+	mu  sync.RWMutex
+
+	// Mode
 	mode       string // "server" or "client"
 	secretCode string
-	serverIP   string
-	connected  bool
-	mu         sync.RWMutex
+
+	// Server state
+	server     *vpn.Server
+	serverPort int
+
+	// Client state
+	client   *vpn.Client
+	serverIP string
 
 	// Split tunnel configuration
 	tunneledPorts []int
 	tunnelMode    string // "include" or "exclude"
-
-	// Server state
-	listener net.Listener
 }
 
 // NewApp creates a new App application struct
@@ -32,6 +53,7 @@ func NewApp() *App {
 	return &App{
 		tunneledPorts: []int{},
 		tunnelMode:    "include",
+		serverPort:    51820,
 	}
 }
 
@@ -45,8 +67,12 @@ func (a *App) shutdown(ctx context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if a.listener != nil {
-		a.listener.Close()
+	if a.server != nil {
+		a.server.Stop()
+	}
+
+	if a.client != nil {
+		a.client.Disconnect()
 	}
 }
 
@@ -62,7 +88,7 @@ func (a *App) SetMode(mode string) error {
 
 	if mode == "server" {
 		// Generate new secret code for server mode
-		a.secretCode = generateSecretCode()
+		a.secretCode = vpn.GenerateSecretCode()
 	}
 
 	return nil
@@ -86,7 +112,7 @@ func (a *App) GetSecretCode() string {
 func (a *App) RegenerateSecretCode() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.secretCode = generateSecretCode()
+	a.secretCode = vpn.GenerateSecretCode()
 	return a.secretCode
 }
 
@@ -112,10 +138,28 @@ func (a *App) ConnectToServer(serverIP string, secretCode string) error {
 	a.serverIP = serverIP
 	a.secretCode = secretCode
 
-	// TODO: Implement actual VPN connection using WireGuard
-	// For now, this is a placeholder
-	a.connected = true
+	// Create VPN client
+	client, err := vpn.NewClient(vpn.ClientConfig{
+		ServerAddr: serverIP,
+		ServerPort: a.serverPort,
+		SecretCode: secretCode,
+		OnStateChange: func(state vpn.TunnelState) {
+			// State change callback - could emit events to frontend
+		},
+		OnError: func(err error) {
+			// Error callback
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
 
+	// Connect to server
+	if err := client.Connect(); err != nil {
+		return fmt.Errorf("connection failed: %w", err)
+	}
+
+	a.client = client
 	return nil
 }
 
@@ -124,8 +168,11 @@ func (a *App) Disconnect() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// TODO: Implement actual VPN disconnection
-	a.connected = false
+	if a.client != nil {
+		a.client.Disconnect()
+		a.client = nil
+	}
+
 	return nil
 }
 
@@ -133,7 +180,39 @@ func (a *App) Disconnect() error {
 func (a *App) IsConnected() bool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.connected
+
+	if a.mode == "server" {
+		return a.server != nil
+	}
+
+	return a.client != nil && a.client.IsConnected()
+}
+
+// GetConnectionInfo returns detailed connection information
+func (a *App) GetConnectionInfo() ConnectionInfo {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	info := ConnectionInfo{
+		State: "disconnected",
+	}
+
+	if a.mode == "client" && a.client != nil {
+		state := a.client.State()
+		info.State = state.String()
+		info.ServerIP = a.serverIP
+
+		if state == vpn.TunnelStateConnected {
+			stats := a.client.Stats()
+			info.ConnectedAt = stats.ConnectedAt.Format(time.RFC3339)
+			info.BytesSent = stats.BytesSent
+			info.BytesRecv = stats.BytesReceived
+		}
+	} else if a.mode == "server" && a.server != nil {
+		info.State = "running"
+	}
+
+	return info
 }
 
 // StartServer starts the VPN server (server mode only)
@@ -145,18 +224,33 @@ func (a *App) StartServer(port int) error {
 		return fmt.Errorf("not in server mode")
 	}
 
-	// TODO: Implement actual VPN server using WireGuard
-	// For now, this is a placeholder that creates a TCP listener
-
-	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("failed to start server: %v", err)
+	if a.server != nil {
+		return fmt.Errorf("server already running")
 	}
 
-	a.listener = listener
-	a.connected = true
+	a.serverPort = port
 
+	// Create VPN server
+	server, err := vpn.NewServer(vpn.ServerConfig{
+		Port:       port,
+		SecretCode: a.secretCode,
+		OnClient: func(session *vpn.ClientSession) {
+			// Client connected callback
+		},
+		OnError: func(err error) {
+			// Error callback
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create server: %w", err)
+	}
+
+	// Start server
+	if err := server.Start(); err != nil {
+		return fmt.Errorf("failed to start server: %w", err)
+	}
+
+	a.server = server
 	return nil
 }
 
@@ -165,13 +259,47 @@ func (a *App) StopServer() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if a.listener != nil {
-		a.listener.Close()
-		a.listener = nil
+	if a.server != nil {
+		a.server.Stop()
+		a.server = nil
 	}
-	a.connected = false
 
 	return nil
+}
+
+// GetConnectedClients returns list of connected clients (server mode)
+func (a *App) GetConnectedClients() []ClientInfo {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.server == nil {
+		return []ClientInfo{}
+	}
+
+	clients := a.server.GetClients()
+	result := make([]ClientInfo, len(clients))
+
+	for i, c := range clients {
+		result[i] = ClientInfo{
+			SessionID:   fmt.Sprintf("%x", c.ID[:8]),
+			RemoteAddr:  c.RemoteAddr,
+			ConnectedAt: c.ConnectedAt.Format(time.RFC3339),
+		}
+	}
+
+	return result
+}
+
+// GetClientCount returns number of connected clients (server mode)
+func (a *App) GetClientCount() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if a.server == nil {
+		return 0
+	}
+
+	return a.server.ClientCount()
 }
 
 // SetTunneledPorts sets the ports to be tunneled through VPN
@@ -193,7 +321,7 @@ func (a *App) SetTunneledPorts(ports []int, mode string) error {
 	a.tunneledPorts = ports
 	a.tunnelMode = mode
 
-	// TODO: Apply split tunnel rules via WFP
+	// TODO: Apply split tunnel rules via WFP when connected
 
 	return nil
 }
@@ -226,13 +354,26 @@ func (a *App) GetLocalIP() string {
 	return "Unknown"
 }
 
-// generateSecretCode creates a random 20-character base32 secret code
-func generateSecretCode() string {
-	bytes := make([]byte, 12)
-	rand.Read(bytes)
-	code := base32.StdEncoding.EncodeToString(bytes)
-	// Format as XXXX-XXXX-XXXX-XXXX-XXXX for readability
-	code = strings.ToUpper(code[:20])
-	return fmt.Sprintf("%s-%s-%s-%s-%s",
-		code[0:4], code[4:8], code[8:12], code[12:16], code[16:20])
+// GetServerPort returns the configured server port
+func (a *App) GetServerPort() int {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.serverPort
+}
+
+// SetServerPort sets the server port (before starting)
+func (a *App) SetServerPort(port int) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.server != nil {
+		return fmt.Errorf("cannot change port while server is running")
+	}
+
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("invalid port: %d", port)
+	}
+
+	a.serverPort = port
+	return nil
 }

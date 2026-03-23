@@ -1,6 +1,6 @@
 <script>
-  import { onMount } from 'svelte'
-  import { GetSecretCode, RegenerateSecretCode, StartServer, StopServer, IsConnected, GetLocalIP } from '../../wailsjs/go/main/App'
+  import { onMount, onDestroy } from 'svelte'
+  import { GetSecretCode, RegenerateSecretCode, StartServer, StopServer, IsConnected, GetLocalIP, GetClientCount } from '../../wailsjs/go/main/App'
 
   let secretCode = $state('')
   let serverRunning = $state(false)
@@ -9,15 +9,30 @@
   let loading = $state(false)
   let error = $state(null)
   let copied = $state(false)
+  let clientCount = $state(0)
+  let pollInterval = null
 
   onMount(async () => {
     try {
       secretCode = await GetSecretCode()
       serverRunning = await IsConnected()
       localIP = await GetLocalIP()
+
+      // Poll for client count when server is running
+      pollInterval = setInterval(async () => {
+        if (serverRunning) {
+          try {
+            clientCount = await GetClientCount()
+          } catch (e) {}
+        }
+      }, 2000)
     } catch (e) {
       error = e.message
     }
+  })
+
+  onDestroy(() => {
+    if (pollInterval) clearInterval(pollInterval)
   })
 
   async function regenerateCode() {
@@ -61,6 +76,12 @@
       <h3>Server Status</h3>
       <span>{serverRunning ? 'Running' : 'Stopped'}</span>
     </div>
+    {#if serverRunning}
+      <div class="client-count">
+        <span class="count">{clientCount}</span>
+        <span class="label">client{clientCount !== 1 ? 's' : ''}</span>
+      </div>
+    {/if}
   </div>
 
   {#if error}
@@ -194,6 +215,27 @@
   .status-text span {
     font-size: 1.25rem;
     font-weight: 600;
+  }
+
+  .client-count {
+    margin-left: auto;
+    text-align: center;
+    padding: 8px 16px;
+    background: rgba(79, 195, 247, 0.1);
+    border-radius: 8px;
+  }
+
+  .client-count .count {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #4fc3f7;
+  }
+
+  .client-count .label {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
   }
 
   .error {

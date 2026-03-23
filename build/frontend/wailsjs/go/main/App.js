@@ -10,6 +10,18 @@ export function Disconnect() {
   return window['go']['main']['App']['Disconnect']();
 }
 
+export function GetClientCount() {
+  return window['go']['main']['App']['GetClientCount']();
+}
+
+export function GetConnectedClients() {
+  return window['go']['main']['App']['GetConnectedClients']();
+}
+
+export function GetConnectionInfo() {
+  return window['go']['main']['App']['GetConnectionInfo']();
+}
+
 export function GetLocalIP() {
   return window['go']['main']['App']['GetLocalIP']();
 }
@@ -20,6 +32,10 @@ export function GetMode() {
 
 export function GetSecretCode() {
   return window['go']['main']['App']['GetSecretCode']();
+}
+
+export function GetServerPort() {
+  return window['go']['main']['App']['GetServerPort']();
 }
 
 export function GetTunneledPorts() {
@@ -36,6 +52,10 @@ export function RegenerateSecretCode() {
 
 export function SetMode(arg1) {
   return window['go']['main']['App']['SetMode'](arg1);
+}
+
+export function SetServerPort(arg1) {
+  return window['go']['main']['App']['SetServerPort'](arg1);
 }
 
 export function SetTunneledPorts(arg1, arg2) {
