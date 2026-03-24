@@ -2,7 +2,7 @@
 
 A lightweight, modern VPN application with real traffic routing, split tunneling, and NAT traversal support for Windows.
 
-[![Download](https://img.shields.io/badge/Download-v2.2.0-blue?style=for-the-badge&logo=windows)](https://github.com/alex-luncan/miniVPN/releases/download/v2.2.0/miniVPN.zip)
+[![Download](https://img.shields.io/badge/Download-v2.2.1-blue?style=for-the-badge&logo=windows)](https://github.com/alex-luncan/miniVPN/releases/download/v2.2.1/miniVPN.zip)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](https://github.com/alex-luncan/miniVPN/blob/main/license)
 
 ![miniVPN Screenshot](docs/images/screenshot.png)
