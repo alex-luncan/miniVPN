@@ -331,15 +331,26 @@ func (a *App) ConnectToServer(serverIP string, port int, secretCode string) erro
 
 	// Check split tunnel configuration to determine routing mode
 	config := a.splitTunnel.GetConfig()
-	appDebugLog("Split tunnel config: enabled=%v, mode=%s, ports=%v", config.Enabled, config.Mode, config.Ports)
+	appDebugLog("Split tunnel config: enabled=%v, mode=%s", config.Enabled, config.Mode)
 
-	// Also check app filter manager for app-based split tunneling
+	// Also check the global splitTunnelAppMode which is set by the UI
+	appDebugLog("Global split tunnel mode: %s", splitTunnelAppMode)
+
+	// Also check app filter manager
 	afm := splittunnel.GetAppFilterManager()
 	routingMode := afm.GetRoutingRecommendation()
 	appDebugLog("App filter manager: enabled=%v, mode=%s, routing=%s", afm.IsEnabled(), afm.GetMode(), routingMode)
 
-	// Use split tunnel if either port-based or app-based is configured for include mode
-	useSplitTunnel := (config.Enabled && config.Mode == splittunnel.ModeInclude) || routingMode == "split"
+	// Use split tunnel if:
+	// 1. splitTunnelAppMode is "include" (set by UI)
+	// 2. OR config.Enabled is true with ModeInclude
+	// 3. OR afm routing recommendation is "split"
+	useSplitTunnel := splitTunnelAppMode == "include" ||
+		(config.Enabled && config.Mode == splittunnel.ModeInclude) ||
+		routingMode == "split"
+
+	appDebugLog("useSplitTunnel decision: %v (mode=%s, config.Enabled=%v, routingMode=%s)",
+		useSplitTunnel, splitTunnelAppMode, config.Enabled, routingMode)
 
 	if useSplitTunnel {
 		// INCLUDE MODE: Only VPN network traffic goes through VPN
@@ -1188,7 +1199,7 @@ type SplitTunnelApp struct {
 
 // splitTunnelApps stores the configured apps for split tunneling
 var splitTunnelApps []SplitTunnelApp
-var splitTunnelAppMode string = "include" // "include" = only these apps through VPN, "exclude" = these apps bypass VPN
+var splitTunnelAppMode string = "exclude" // "exclude" = full VPN (default), "include" = split tunnel
 
 // SetSplitTunnelApps sets the split tunnel mode (apps parameter kept for API compatibility)
 func (a *App) SetSplitTunnelApps(apps []SplitTunnelApp, mode string) error {

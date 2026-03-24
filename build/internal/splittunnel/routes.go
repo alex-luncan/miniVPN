@@ -353,6 +353,32 @@ func SetupVPNRoutesForSplitTunnel(serverRealIP, vpnGateway, vpnSubnet net.IP, vp
 		return fmt.Errorf("failed to add VPN subnet route: %w", err)
 	}
 
+	// Add additional routes for networks accessible through VPN server
+	additionalNetworks := []struct {
+		subnet net.IP
+		mask   net.IPMask
+	}{
+		{net.IPv4(10, 101, 4, 0), net.IPv4Mask(255, 255, 255, 0)},   // 10.101.4.0/24
+		{net.IPv4(10, 101, 0, 0), net.IPv4Mask(255, 255, 0, 0)},     // 10.101.0.0/16 (broader access)
+	}
+
+	for _, network := range additionalNetworks {
+		routeDebugLog("Adding additional VPN route: %s mask %s via %s IF %d", network.subnet, net.IP(network.mask), vpnGateway, vpnIfIndex)
+		if err := AddRouteWithInterface(network.subnet, net.IP(network.mask), vpnGateway, 1, vpnIfIndex); err != nil {
+			routeDebugLog("Warning: failed to add route for %s: %v", network.subnet, err)
+		}
+	}
+
+	// IMPORTANT: Delete the automatic default route that Windows creates when
+	// setting up the TUN adapter with a gateway. This route would override our
+	// split tunnel configuration and send all traffic through VPN.
+	routeDebugLog("Removing automatic VPN default route to enable split tunneling...")
+	if err := DeleteRoute(net.IPv4(0, 0, 0, 0), net.IPv4(0, 0, 0, 0), vpnGateway); err != nil {
+		routeDebugLog("Note: Could not remove automatic default route (may not exist): %v", err)
+	} else {
+		routeDebugLog("Automatic default route removed successfully")
+	}
+
 	rm.configured = true
 	routeDebugLog("Split tunnel routes setup complete - normal traffic will use original gateway")
 	return nil

@@ -2,7 +2,7 @@
 
 A lightweight, modern VPN application with real traffic routing, split tunneling, and NAT traversal support for Windows.
 
-[![Download](https://img.shields.io/badge/Download-v2.2.1-blue?style=for-the-badge&logo=windows)](https://github.com/alex-luncan/miniVPN/releases/download/v2.2.1/miniVPN.zip)
+[![Download](https://img.shields.io/badge/Download-v2.2.2-blue?style=for-the-badge&logo=windows)](https://github.com/alex-luncan/miniVPN/releases/download/v2.2.2/miniVPN.zip)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](https://github.com/alex-luncan/miniVPN/blob/main/license)
 
 ![miniVPN Screenshot](docs/images/screenshot.png)
@@ -88,7 +88,7 @@ NAT Traversal requires a signaling server running on a machine with a public IP 
 
 miniVPN supports two routing modes:
 
-- **Split Tunnel Mode**: Only traffic to VPN network (10.0.0.x) goes through VPN. Your real IP is used for internet traffic.
+- **Split Tunnel Mode**: Only traffic to VPN networks goes through VPN. Your real IP is used for internet traffic.
 - **Full VPN Mode**: All traffic goes through VPN. Your public IP shows the VPN server's IP.
 
 ### How to Use
@@ -103,8 +103,15 @@ miniVPN supports two routing modes:
 
 | Mode | Use Case | Your Public IP |
 |------|----------|----------------|
-| Split Tunnel | Access VPN network resources (10.0.0.x) while keeping normal internet speed | Your real IP |
+| Split Tunnel | Access VPN network resources while keeping normal internet speed | Your real IP |
 | Full VPN | Maximum privacy, hide your real IP | VPN server IP |
+
+### Networks Routed Through VPN (Split Tunnel Mode)
+In split tunnel mode, the following networks are routed through VPN:
+- `10.0.0.0/24` - VPN client network
+- `10.101.0.0/16` - Additional private networks accessible via VPN server
+
+All other traffic (internet browsing, etc.) uses your normal connection.
 
 **Note**: Changes to split tunnel mode take effect on the next connection.
 
