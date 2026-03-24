@@ -1190,7 +1190,7 @@ type SplitTunnelApp struct {
 var splitTunnelApps []SplitTunnelApp
 var splitTunnelAppMode string = "include" // "include" = only these apps through VPN, "exclude" = these apps bypass VPN
 
-// SetSplitTunnelApps sets the applications for split tunneling
+// SetSplitTunnelApps sets the split tunnel mode (apps parameter kept for API compatibility)
 func (a *App) SetSplitTunnelApps(apps []SplitTunnelApp, mode string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1202,34 +1202,32 @@ func (a *App) SetSplitTunnelApps(apps []SplitTunnelApp, mode string) error {
 	splitTunnelApps = apps
 	splitTunnelAppMode = mode
 
-	appDebugLog("Split tunnel apps configured: mode=%s, apps=%d", mode, len(apps))
-	for _, app := range apps {
-		appDebugLog("  - %s (%s)", app.Name, app.Path)
+	appDebugLog("Split tunnel mode configured: %s", mode)
+	if mode == "include" {
+		appDebugLog("  -> Split tunnel: Only VPN network (10.0.0.x) will use VPN")
+		appDebugLog("  -> Internet traffic will use your real IP")
+	} else {
+		appDebugLog("  -> Full VPN: All traffic will go through VPN")
+		appDebugLog("  -> Internet traffic will show server IP")
 	}
 
-	// Update the split tunnel config
+	// Update the split tunnel config - mode determines routing
+	// "include" = split tunnel (only VPN subnet through VPN)
+	// "exclude" = full VPN (all traffic through VPN)
 	config := splittunnel.Config{
-		Enabled: len(apps) > 0,
+		Enabled: mode == "include", // Enable split tunnel only for include mode
 		Mode:    splittunnel.Mode(mode),
-		Ports:   []uint16{}, // Not using ports anymore
+		Ports:   []uint16{},
 	}
 
 	if err := a.splitTunnel.Configure(config); err != nil {
 		return fmt.Errorf("failed to configure split tunnel: %w", err)
 	}
 
-	// Also update the AppFilterManager
+	// Update the AppFilterManager
 	afm := splittunnel.GetAppFilterManager()
-	stApps := make([]splittunnel.SplitTunnelApp, len(apps))
-	for i, app := range apps {
-		stApps[i] = splittunnel.SplitTunnelApp{
-			Path:    app.Path,
-			Name:    app.Name,
-			ExeName: app.ExeName,
-		}
-	}
-	afm.SetApps(stApps, mode)
-	if len(apps) > 0 {
+	afm.SetMode(mode)
+	if mode == "include" {
 		afm.Enable()
 	} else {
 		afm.Disable()

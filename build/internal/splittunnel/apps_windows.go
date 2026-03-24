@@ -662,12 +662,12 @@ func (m *AppFilterManager) applyFilters() error {
 	return nil
 }
 
-// GetRoutingRecommendation returns routing advice based on app config
+// GetRoutingRecommendation returns routing advice based on mode
 func (m *AppFilterManager) GetRoutingRecommendation() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if !m.enabled || len(m.apps) == 0 {
+	if !m.enabled {
 		return "full" // Route all through VPN
 	}
 
@@ -675,7 +675,7 @@ func (m *AppFilterManager) GetRoutingRecommendation() string {
 		return "split" // Only route VPN subnet
 	}
 
-	return "full" // Exclude mode: route all, apps list is informational
+	return "full" // Exclude mode: route all through VPN
 }
 
 // AppFilter manages WFP-based application filtering (legacy interface)

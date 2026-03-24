@@ -146,11 +146,11 @@ func (m *AppFilterManager) Stop() error {
 	return nil
 }
 
-// GetRoutingRecommendation returns routing advice based on app config
+// GetRoutingRecommendation returns routing advice based on mode
 func (m *AppFilterManager) GetRoutingRecommendation() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if !m.enabled || len(m.apps) == 0 {
+	if !m.enabled {
 		return "full"
 	}
 	if m.mode == AppModeInclude {

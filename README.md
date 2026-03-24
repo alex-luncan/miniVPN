@@ -13,7 +13,7 @@ A lightweight, modern VPN application with real traffic routing, split tunneling
 - **Server Mode**: Host a VPN server with auto-generated secret codes and NAT/forwarding
 - **Client Mode**: Connect to VPN servers with IP and secret code
 - **NAT Traversal**: UDP hole punching for connecting through firewalls and routers
-- **Split Tunneling**: Route specific applications through VPN while keeping other traffic on normal network
+- **Split Tunneling**: Choose between full VPN (all traffic) or split tunnel (only VPN network traffic)
 - **Auto Firewall Rules**: Automatically configures Windows Firewall on startup
 - **Automatic IP Assignment**: Server assigns VPN IPs (10.0.0.x) to clients automatically
 - **Modern UI**: Clean, dark-themed interface built with Svelte
@@ -86,31 +86,27 @@ NAT Traversal requires a signaling server running on a machine with a public IP 
 
 ## Split Tunneling
 
-miniVPN allows you to route only specific applications through the VPN:
+miniVPN supports two routing modes:
 
-- **Include Mode**: Only selected apps go through VPN (your real IP is used for other traffic)
-- **Exclude Mode**: All traffic goes through VPN
+- **Split Tunnel Mode**: Only traffic to VPN network (10.0.0.x) goes through VPN. Your real IP is used for internet traffic.
+- **Full VPN Mode**: All traffic goes through VPN. Your public IP shows the VPN server's IP.
 
 ### How to Use
-1. Connect to a VPN server
-2. Navigate to the Split Tunneling configuration
-3. Select **Include Mode** to use split tunneling
-4. Search and select applications from the list of running apps
-5. Click **Save Configuration**
+1. Open Split Tunneling configuration
+2. Select your preferred mode:
+   - **Split Tunnel** - Access VPN resources while keeping your real IP for internet
+   - **Full VPN** - Route everything through VPN for privacy
+3. Click **Save Configuration**
+4. Connect (or reconnect) to the VPN server
 
-### Use Cases
-- Route only your browser through VPN for private browsing
-- Keep work apps (Slack, Teams) on normal connection for better latency
-- Route torrent clients through VPN while keeping other apps on normal network
-- Test specific applications with VPN while maintaining normal connectivity for others
+### When to Use Each Mode
 
-### Supported Applications
-The UI displays running applications with friendly names and category icons:
-- **Browsers**: Chrome, Firefox, Edge, Brave, Opera
-- **Chat Apps**: Discord, Slack, Teams, Zoom, Skype
-- **Games**: Steam, Epic Games, Battle.net, Origin
-- **Dev Tools**: VS Code, Visual Studio, JetBrains IDEs
-- **And more**: Any running application can be selected
+| Mode | Use Case | Your Public IP |
+|------|----------|----------------|
+| Split Tunnel | Access VPN network resources (10.0.0.x) while keeping normal internet speed | Your real IP |
+| Full VPN | Maximum privacy, hide your real IP | VPN server IP |
+
+**Note**: Changes to split tunnel mode take effect on the next connection.
 
 ## Firewall Configuration
 
