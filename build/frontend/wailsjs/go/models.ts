@@ -1,5 +1,23 @@
 export namespace main {
 	
+	export class AppInfo {
+	    pid: number;
+	    name: string;
+	    path: string;
+	    exeName: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AppInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pid = source["pid"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.exeName = source["exeName"];
+	    }
+	}
 	export class ClientInfo {
 	    sessionId: string;
 	    remoteAddr: string;
@@ -34,6 +52,22 @@ export namespace main {
 	        this.connectedAt = source["connectedAt"];
 	        this.bytesSent = source["bytesSent"];
 	        this.bytesRecv = source["bytesRecv"];
+	    }
+	}
+	export class SplitTunnelApp {
+	    path: string;
+	    name: string;
+	    exeName: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SplitTunnelApp(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.exeName = source["exeName"];
 	    }
 	}
 	export class SplitTunnelStatus {

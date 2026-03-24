@@ -320,11 +320,30 @@ func GetDefaultGateway() (net.IP, string, error) {
 	return nil, "", fmt.Errorf("default gateway not found")
 }
 
+// GetDefaultGatewayWithIndex returns the default gateway, interface name, and interface index
+func GetDefaultGatewayWithIndex() (net.IP, string, int, error) {
+	// Use Windows API to get the default gateway
+	routes, err := getRouteTable()
+	if err != nil {
+		return nil, "", 0, err
+	}
+
+	for _, route := range routes {
+		// Find the default route (destination 0.0.0.0)
+		if route.destination.Equal(net.IPv4zero) {
+			return route.gateway, route.ifaceName, route.ifIndex, nil
+		}
+	}
+
+	return nil, "", 0, fmt.Errorf("default gateway not found")
+}
+
 type routeInfo struct {
 	destination net.IP
 	gateway     net.IP
 	mask        net.IPMask
 	ifaceName   string
+	ifIndex     int
 	metric      uint32
 }
 
@@ -389,6 +408,7 @@ func getRouteTable() ([]routeInfo, error) {
 			gateway:     gateway,
 			mask:        mask,
 			ifaceName:   ifaceName,
+			ifIndex:     int(ifIndex),
 			metric:      metric,
 		})
 	}
@@ -501,6 +521,68 @@ func RunAsAdmin() bool {
 	}
 
 	return member
+}
+
+// GetSystemDNSServers returns the system's configured DNS servers
+func GetSystemDNSServers() []net.IP {
+	var dnsServers []net.IP
+
+	// Use netsh to get DNS servers
+	output, err := runCmd("netsh", "interface", "ipv4", "show", "dnsservers")
+	if err != nil {
+		return dnsServers
+	}
+
+	// Parse output for IP addresses
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Look for lines that contain IP addresses
+		fields := strings.Fields(line)
+		for _, field := range fields {
+			ip := net.ParseIP(field)
+			if ip != nil && ip.To4() != nil {
+				// Check if we already have this DNS
+				found := false
+				for _, existing := range dnsServers {
+					if existing.Equal(ip) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					dnsServers = append(dnsServers, ip)
+				}
+			}
+		}
+	}
+
+	return dnsServers
+}
+
+// isPrivateIP checks if an IP is in a private range
+func isPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+
+	// 10.0.0.0/8
+	if ip4[0] == 10 {
+		return true
+	}
+	// 172.16.0.0/12
+	if ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31 {
+		return true
+	}
+	// 192.168.0.0/16
+	if ip4[0] == 192 && ip4[1] == 168 {
+		return true
+	}
+	return false
 }
 
 // Ensure syscall is used

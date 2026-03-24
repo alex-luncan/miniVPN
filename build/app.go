@@ -105,6 +105,10 @@ func (a *App) shutdown(ctx context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	// Stop app filter manager
+	afm := splittunnel.GetAppFilterManager()
+	afm.Stop()
+
 	// Teardown VPN routes
 	splittunnel.TeardownVPNRoutes()
 
@@ -300,7 +304,7 @@ func (a *App) ConnectToServer(serverIP string, port int, secretCode string) erro
 
 	a.tunAdapter = tunAdapter
 
-	// Create and start bridge between TUN and tunnel
+	// Create bridge (simple version without bypass handler)
 	appDebugLog("Creating bridge...")
 	bridge, err := vpn.NewBridge(vpn.BridgeConfig{
 		Adapter: tunAdapter,
@@ -325,25 +329,57 @@ func (a *App) ConnectToServer(serverIP string, port int, secretCode string) erro
 
 	a.bridge = bridge
 
-	// Setup VPN routes (route all traffic through VPN)
-	appDebugLog("Setting up VPN routes...")
-	appDebugLog("  Server real IP: %s", serverRealIP.String())
-	appDebugLog("  VPN gateway: %s", serverVPNIP.String())
-	if err := splittunnel.SetupVPNRoutes(serverRealIP, serverVPNIP, "miniVPN"); err != nil {
-		appDebugLog("ERROR: Failed to setup VPN routes: %v", err)
-		bridge.Stop()
-		tunAdapter.Stop()
-		client.Disconnect()
-		return fmt.Errorf("failed to setup VPN routes: %w", err)
-	}
-	appDebugLog("VPN routes configured successfully!")
-
-	// Start split tunneling if configured
+	// Check split tunnel configuration to determine routing mode
 	config := a.splitTunnel.GetConfig()
-	if config.Enabled && len(config.Ports) > 0 {
-		appDebugLog("Starting split tunnel...")
-		a.splitTunnel.SetVPNInterface(serverVPNIP, "miniVPN")
-		a.splitTunnel.Start()
+	appDebugLog("Split tunnel config: enabled=%v, mode=%s, ports=%v", config.Enabled, config.Mode, config.Ports)
+
+	// Also check app filter manager for app-based split tunneling
+	afm := splittunnel.GetAppFilterManager()
+	routingMode := afm.GetRoutingRecommendation()
+	appDebugLog("App filter manager: enabled=%v, mode=%s, routing=%s", afm.IsEnabled(), afm.GetMode(), routingMode)
+
+	// Use split tunnel if either port-based or app-based is configured for include mode
+	useSplitTunnel := (config.Enabled && config.Mode == splittunnel.ModeInclude) || routingMode == "split"
+
+	if useSplitTunnel {
+		// INCLUDE MODE: Only VPN network traffic goes through VPN
+		// Normal internet traffic uses regular network (no VPN)
+		appDebugLog("Setting up SPLIT TUNNEL routes (include mode)...")
+		appDebugLog("  Server real IP: %s", serverRealIP.String())
+		appDebugLog("  VPN gateway: %s", serverVPNIP.String())
+		appDebugLog("  Only VPN network (10.0.0.0/24) will use VPN tunnel")
+		appDebugLog("  All other internet traffic uses normal network")
+
+		// Only add route for VPN subnet - NOT catch-all routes
+		vpnSubnet := net.IPv4(10, 0, 0, 0)
+		vpnMask := net.IPv4Mask(255, 255, 255, 0)
+		if subnetMask != nil {
+			vpnMask = subnetMask
+		}
+
+		if err := splittunnel.SetupVPNRoutesForSplitTunnel(serverRealIP, serverVPNIP, vpnSubnet, vpnMask, "miniVPN"); err != nil {
+			appDebugLog("ERROR: Failed to setup split tunnel routes: %v", err)
+			bridge.Stop()
+			tunAdapter.Stop()
+			client.Disconnect()
+			return fmt.Errorf("failed to setup split tunnel routes: %w", err)
+		}
+		appDebugLog("SPLIT TUNNEL ACTIVE:")
+		appDebugLog("  - Traffic to 10.0.0.x -> VPN tunnel")
+		appDebugLog("  - All other traffic -> Normal internet (your real IP)")
+	} else {
+		// FULL VPN MODE: Route all traffic through VPN
+		appDebugLog("Setting up FULL VPN routes (all traffic through VPN)...")
+		appDebugLog("  Server real IP: %s", serverRealIP.String())
+		appDebugLog("  VPN gateway: %s", serverVPNIP.String())
+		if err := splittunnel.SetupVPNRoutes(serverRealIP, serverVPNIP, "miniVPN"); err != nil {
+			appDebugLog("ERROR: Failed to setup VPN routes: %v", err)
+			bridge.Stop()
+			tunAdapter.Stop()
+			client.Disconnect()
+			return fmt.Errorf("failed to setup VPN routes: %w", err)
+		}
+		appDebugLog("FULL VPN MODE ACTIVE - All traffic goes through VPN")
 	}
 
 	appDebugLog("CONNECTION COMPLETE - VPN is now active!")
@@ -356,6 +392,10 @@ func (a *App) cleanupVPNConnection() {
 	if a.splitTunnel != nil {
 		a.splitTunnel.Stop()
 	}
+
+	// Stop app filter manager
+	afm := splittunnel.GetAppFilterManager()
+	afm.Stop()
 
 	// Teardown VPN routes
 	splittunnel.TeardownVPNRoutes()
@@ -1105,4 +1145,186 @@ func (a *App) GetDebugInfo() map[string]interface{} {
 	}
 
 	return info
+}
+
+// ============== Application-Based Split Tunneling ==============
+
+// AppInfo represents an application for the UI
+type AppInfo struct {
+	PID     uint32 `json:"pid"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	ExeName string `json:"exeName"`
+}
+
+// GetRunningApps returns a list of running applications that can be configured for split tunneling
+func (a *App) GetRunningApps() []AppInfo {
+	apps, err := splittunnel.GetRunningApps()
+	if err != nil {
+		appDebugLog("Error getting running apps: %v", err)
+		return []AppInfo{}
+	}
+
+	result := make([]AppInfo, len(apps))
+	for i, app := range apps {
+		result[i] = AppInfo{
+			PID:     app.PID,
+			Name:    app.Name,
+			Path:    app.Path,
+			ExeName: app.ExeName,
+		}
+	}
+
+	appDebugLog("Found %d running apps", len(result))
+	return result
+}
+
+// SplitTunnelApp represents an app configured for split tunneling
+type SplitTunnelApp struct {
+	Path    string `json:"path"`
+	Name    string `json:"name"`
+	ExeName string `json:"exeName"`
+}
+
+// splitTunnelApps stores the configured apps for split tunneling
+var splitTunnelApps []SplitTunnelApp
+var splitTunnelAppMode string = "include" // "include" = only these apps through VPN, "exclude" = these apps bypass VPN
+
+// SetSplitTunnelApps sets the applications for split tunneling
+func (a *App) SetSplitTunnelApps(apps []SplitTunnelApp, mode string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if mode != "include" && mode != "exclude" {
+		return fmt.Errorf("invalid mode: %s (must be 'include' or 'exclude')", mode)
+	}
+
+	splitTunnelApps = apps
+	splitTunnelAppMode = mode
+
+	appDebugLog("Split tunnel apps configured: mode=%s, apps=%d", mode, len(apps))
+	for _, app := range apps {
+		appDebugLog("  - %s (%s)", app.Name, app.Path)
+	}
+
+	// Update the split tunnel config
+	config := splittunnel.Config{
+		Enabled: len(apps) > 0,
+		Mode:    splittunnel.Mode(mode),
+		Ports:   []uint16{}, // Not using ports anymore
+	}
+
+	if err := a.splitTunnel.Configure(config); err != nil {
+		return fmt.Errorf("failed to configure split tunnel: %w", err)
+	}
+
+	// Also update the AppFilterManager
+	afm := splittunnel.GetAppFilterManager()
+	stApps := make([]splittunnel.SplitTunnelApp, len(apps))
+	for i, app := range apps {
+		stApps[i] = splittunnel.SplitTunnelApp{
+			Path:    app.Path,
+			Name:    app.Name,
+			ExeName: app.ExeName,
+		}
+	}
+	afm.SetApps(stApps, mode)
+	if len(apps) > 0 {
+		afm.Enable()
+	} else {
+		afm.Disable()
+	}
+
+	return nil
+}
+
+// GetSplitTunnelApps returns the current split tunnel app configuration
+func (a *App) GetSplitTunnelApps() map[string]interface{} {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	return map[string]interface{}{
+		"apps": splitTunnelApps,
+		"mode": splitTunnelAppMode,
+	}
+}
+
+// AddSplitTunnelApp adds an application to the split tunnel list
+func (a *App) AddSplitTunnelApp(path, name, exeName string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Check if already exists
+	for _, app := range splitTunnelApps {
+		if strings.EqualFold(app.Path, path) {
+			return nil // Already exists
+		}
+	}
+
+	splitTunnelApps = append(splitTunnelApps, SplitTunnelApp{
+		Path:    path,
+		Name:    name,
+		ExeName: exeName,
+	})
+
+	appDebugLog("Added app to split tunnel: %s (%s)", name, path)
+
+	// Update config
+	config := splittunnel.Config{
+		Enabled: len(splitTunnelApps) > 0,
+		Mode:    splittunnel.Mode(splitTunnelAppMode),
+		Ports:   []uint16{},
+	}
+	a.splitTunnel.Configure(config)
+
+	return nil
+}
+
+// RemoveSplitTunnelApp removes an application from the split tunnel list
+func (a *App) RemoveSplitTunnelApp(path string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	newApps := make([]SplitTunnelApp, 0, len(splitTunnelApps))
+	for _, app := range splitTunnelApps {
+		if !strings.EqualFold(app.Path, path) {
+			newApps = append(newApps, app)
+		}
+	}
+	splitTunnelApps = newApps
+
+	appDebugLog("Removed app from split tunnel: %s", path)
+
+	// Update config
+	config := splittunnel.Config{
+		Enabled: len(splitTunnelApps) > 0,
+		Mode:    splittunnel.Mode(splitTunnelAppMode),
+		Ports:   []uint16{},
+	}
+	a.splitTunnel.Configure(config)
+
+	return nil
+}
+
+// SetSplitTunnelAppMode sets the split tunnel mode for apps
+func (a *App) SetSplitTunnelAppMode(mode string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if mode != "include" && mode != "exclude" {
+		return fmt.Errorf("invalid mode: %s", mode)
+	}
+
+	splitTunnelAppMode = mode
+	appDebugLog("Split tunnel app mode set to: %s", mode)
+
+	// Update config
+	config := splittunnel.Config{
+		Enabled: len(splitTunnelApps) > 0,
+		Mode:    splittunnel.Mode(mode),
+		Ports:   []uint16{},
+	}
+	a.splitTunnel.Configure(config)
+
+	return nil
 }

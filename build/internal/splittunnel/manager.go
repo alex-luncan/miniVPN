@@ -173,6 +173,20 @@ func (m *Manager) IsActive() bool {
 	return m.active
 }
 
+// IsEnabled returns whether split tunneling is enabled (for SplitTunnelChecker interface)
+func (m *Manager) IsEnabled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config.Enabled
+}
+
+// GetMode returns the current mode as string (for SplitTunnelChecker interface)
+func (m *Manager) GetMode() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return string(m.config.Mode)
+}
+
 // ShouldTunnel determines if traffic to a port should go through VPN
 func (m *Manager) ShouldTunnel(port uint16) bool {
 	m.mu.RLock()

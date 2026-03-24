@@ -36,6 +36,31 @@ func GetDefaultGateway() (net.IP, string, error) {
 	return nil, "", fmt.Errorf("not implemented on this platform")
 }
 
+// GetDefaultGatewayWithIndex returns the default gateway with interface index (stub for non-Windows)
+func GetDefaultGatewayWithIndex() (net.IP, string, int, error) {
+	return nil, "", 0, fmt.Errorf("not implemented on this platform")
+}
+
+// GetInterfaceIndexByName returns interface index by name (stub for non-Windows)
+func GetInterfaceIndexByName(name string) (int, error) {
+	return 0, fmt.Errorf("not implemented on this platform")
+}
+
+// AddRouteWithInterface adds a route with interface specification (stub for non-Windows)
+func AddRouteWithInterface(destination, mask, gateway net.IP, metric uint32, ifIndex int) error {
+	return fmt.Errorf("not implemented on this platform")
+}
+
+// GetSystemDNSServers returns system DNS servers (stub for non-Windows)
+func GetSystemDNSServers() []net.IP {
+	return nil
+}
+
+// isPrivateIP checks if IP is private (stub for non-Windows)
+func isPrivateIP(ip net.IP) bool {
+	return false
+}
+
 // AddRoute adds a route (stub for non-Windows)
 func AddRoute(destination, mask, gateway net.IP, metric uint32) error {
 	return fmt.Errorf("not implemented on this platform")
@@ -58,6 +83,16 @@ func SetupVPNRoutes(serverRealIP, vpnGateway net.IP, vpnInterfaceName string) er
 
 // TeardownVPNRoutes removes VPN routes (stub for non-Windows)
 func TeardownVPNRoutes() error {
+	return nil
+}
+
+// SetupVPNRoutesForSplitTunnel configures routes for split tunnel mode (stub for non-Windows)
+func SetupVPNRoutesForSplitTunnel(serverRealIP, vpnGateway, vpnSubnet net.IP, vpnMask net.IPMask, vpnInterfaceName string) error {
+	return fmt.Errorf("not implemented on this platform")
+}
+
+// TeardownVPNRoutesForSplitTunnel removes split tunnel routes (stub for non-Windows)
+func TeardownVPNRoutesForSplitTunnel(vpnSubnet net.IP, vpnMask net.IPMask) error {
 	return nil
 }
 

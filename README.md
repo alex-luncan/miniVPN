@@ -2,7 +2,7 @@
 
 A lightweight, modern VPN application with real traffic routing, split tunneling, and NAT traversal support for Windows.
 
-[![Download](https://img.shields.io/badge/Download-v2.1.0-blue?style=for-the-badge&logo=windows)](https://github.com/alex-luncan/miniVPN/releases/download/v2.1.0/miniVPN.zip)
+[![Download](https://img.shields.io/badge/Download-v2.2.0-blue?style=for-the-badge&logo=windows)](https://github.com/alex-luncan/miniVPN/releases/download/v2.2.0/miniVPN.zip)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](https://github.com/alex-luncan/miniVPN/blob/main/license)
 
 ![miniVPN Screenshot](docs/images/screenshot.png)
@@ -13,7 +13,7 @@ A lightweight, modern VPN application with real traffic routing, split tunneling
 - **Server Mode**: Host a VPN server with auto-generated secret codes and NAT/forwarding
 - **Client Mode**: Connect to VPN servers with IP and secret code
 - **NAT Traversal**: UDP hole punching for connecting through firewalls and routers
-- **Split Tunneling**: Route specific ports through VPN while keeping other traffic on normal network
+- **Split Tunneling**: Route specific applications through VPN while keeping other traffic on normal network
 - **Auto Firewall Rules**: Automatically configures Windows Firewall on startup
 - **Automatic IP Assignment**: Server assigns VPN IPs (10.0.0.x) to clients automatically
 - **Modern UI**: Clean, dark-themed interface built with Svelte
@@ -86,16 +86,31 @@ NAT Traversal requires a signaling server running on a machine with a public IP 
 
 ## Split Tunneling
 
-miniVPN allows you to route only specific ports through the VPN:
+miniVPN allows you to route only specific applications through the VPN:
 
-- **Include Mode**: Only selected ports go through VPN (e.g., database port 3306)
-- **Exclude Mode**: All traffic except selected ports goes through VPN
+- **Include Mode**: Only selected apps go through VPN (your real IP is used for other traffic)
+- **Exclude Mode**: All traffic goes through VPN
+
+### How to Use
+1. Connect to a VPN server
+2. Navigate to the Split Tunneling configuration
+3. Select **Include Mode** to use split tunneling
+4. Search and select applications from the list of running apps
+5. Click **Save Configuration**
 
 ### Use Cases
-- Route only database connections (port 5432, 3306, etc.) through VPN
-- Keep general browsing on your normal connection
-- Reduce VPN bandwidth usage
-- Test specific services while maintaining normal connectivity
+- Route only your browser through VPN for private browsing
+- Keep work apps (Slack, Teams) on normal connection for better latency
+- Route torrent clients through VPN while keeping other apps on normal network
+- Test specific applications with VPN while maintaining normal connectivity for others
+
+### Supported Applications
+The UI displays running applications with friendly names and category icons:
+- **Browsers**: Chrome, Firefox, Edge, Brave, Opera
+- **Chat Apps**: Discord, Slack, Teams, Zoom, Skype
+- **Games**: Steam, Epic Games, Battle.net, Origin
+- **Dev Tools**: VS Code, Visual Studio, JetBrains IDEs
+- **And more**: Any running application can be selected
 
 ## Firewall Configuration
 
@@ -160,6 +175,7 @@ miniVPN/
 │   │   ├── firewall/           # Windows Firewall management
 │   │   ├── splittunnel/        # Split tunneling logic
 │   │   │   ├── routes.go       # VPN route setup/teardown
+│   │   │   ├── apps_windows.go # Application enumeration & filtering
 │   │   │   └── wfp_windows.go  # Windows Filtering Platform
 │   │   └── tun/                # Virtual network adapter (Wintun)
 │   │       ├── adapter.go      # TUN adapter abstraction

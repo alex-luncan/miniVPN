@@ -3,10 +3,20 @@ package vpn
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"minivpn/internal/tun"
 )
+
+// Debug logging for bridge
+var DebugBridge = true
+
+func bridgeDebugLog(format string, args ...interface{}) {
+	if DebugBridge {
+		log.Printf("[BRIDGE] "+format, args...)
+	}
+}
 
 // Bridge connects a TUN adapter to a VPN tunnel, handling bidirectional
 // traffic flow between local applications and the remote VPN server.
@@ -22,11 +32,11 @@ type Bridge struct {
 	mu      sync.RWMutex
 
 	// Statistics
-	packetsFromTun    uint64
-	packetsToTun      uint64
-	bytesFromTun      uint64
-	bytesToTun        uint64
-	errorCount        uint64
+	packetsFromTun uint64
+	packetsToTun   uint64
+	bytesFromTun   uint64
+	bytesToTun     uint64
+	errorCount     uint64
 }
 
 // BridgeConfig holds configuration for the bridge
@@ -77,6 +87,7 @@ func (b *Bridge) Start() error {
 		b.tunnelToTun(data)
 	})
 
+	bridgeDebugLog("Bridge started")
 	return nil
 }
 
@@ -94,6 +105,7 @@ func (b *Bridge) Stop() error {
 	}
 
 	b.running = false
+	bridgeDebugLog("Bridge stopped")
 	return nil
 }
 
@@ -120,7 +132,6 @@ func (b *Bridge) tunToTunnel() {
 			case <-b.ctx.Done():
 				return
 			default:
-				// Log error but continue
 				continue
 			}
 		}
